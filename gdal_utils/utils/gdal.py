@@ -15,9 +15,9 @@ from django.contrib.gis.geos import Polygon
 from mapproxy.grid import tile_grid
 from osgeo import gdal, ogr, osr
 
-from utils.exceptions import CancelException
-from utils.helpers import retry, update_progress
-from utils.task_process import TaskProcess
+from gdal_utils.utils.exceptions import CancelException
+from gdal_utils.utils.helpers import retry, update_progress
+from gdal_utils.utils.task_process import TaskProcess
 
 logger = logging.getLogger(__name__)
 
@@ -980,7 +980,7 @@ def get_file_paths(directory):
     """
     paths = {}
     with cd(directory):
-        for dirpath, _, filenames in os.walk("./"):
+        for dirpath, _, filenames in os.walk("/"):
             for f in filenames:
                 paths[os.path.abspath(os.path.join(dirpath, f))] = os.path.join(dirpath, f)
     return paths

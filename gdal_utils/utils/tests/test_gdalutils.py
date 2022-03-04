@@ -6,7 +6,7 @@ from uuid import uuid4
 from django.test import TestCase
 from osgeo import gdal, ogr
 
-from utils.gdalutils import (
+from gdal_utils.utils.gdal import (
     convert,
     convert_raster,
     convert_vector,
@@ -26,13 +26,13 @@ logger = logging.getLogger(__name__)
 class TestGdalUtils(TestCase):
     def setUp(self):
         self.path = os.path.dirname(os.path.realpath(__file__))
-        self.task_process_patcher = patch("utils.gdalutils.TaskProcess")
+        self.task_process_patcher = patch("gdal_utils.utils.gdal.TaskProcess")
         self.task_process = self.task_process_patcher.start()
         self.addCleanup(self.task_process_patcher.stop)
         self.task_uid = uuid4()
 
-    @patch("utils.gdalutils.os.path.isfile")
-    @patch("utils.gdalutils.open_dataset")
+    @patch("gdal_utils.utils.gdal.os.path.isfile")
+    @patch("gdal_utils.utils.gdal.open_dataset")
     def test_get_meta(self, open_dataset_mock, isfile):
         dataset_path = "/path/to/dataset"
         isfile.return_value = True
@@ -103,10 +103,10 @@ class TestGdalUtils(TestCase):
         self.assertFalse(is_envelope(non_env_gj))
         self.assertFalse(is_envelope(empty_gj))
 
-    @patch("utils.gdalutils.get_task_command")
-    @patch("utils.gdalutils.is_envelope")
-    @patch("utils.gdalutils.get_meta")
-    @patch("utils.gdalutils.os.path.isfile")
+    @patch("gdal_utils.utils.gdal.get_task_command")
+    @patch("gdal_utils.utils.gdal.is_envelope")
+    @patch("gdal_utils.utils.gdal.get_meta")
+    @patch("gdal_utils.utils.gdal.os.path.isfile")
     def test_convert(
         self, isfile, get_meta_mock, is_envelope_mock, get_task_command_mock
     ):
@@ -334,8 +334,8 @@ class TestGdalUtils(TestCase):
         self.task_process().start_process.assert_called_once_with(lambda_mock)
         self.task_process.reset_mock()
 
-    @patch("utils.gdalutils.ogr")
-    @patch("utils.gdalutils.gdal")
+    @patch("gdal_utils.utils.gdal.ogr")
+    @patch("gdal_utils.utils.gdal.gdal")
     def test_polygonize(self, mock_gdal, mock_ogr):
         example_input = "input.tif"
         example_output = "output.geojson"
@@ -391,7 +391,7 @@ class TestGdalUtils(TestCase):
         distance = get_distance(point_a, point_b)
         self.assertEqual(int(expected_distance), int(distance))
 
-    @patch("utils.gdalutils.get_distance")
+    @patch("gdal_utils.utils.gdal.get_distance")
     def test_get_dimensions(self, mock_get_distance):
         bbox = [0.0, 1.0, 2.0, 3.0]
         scale = 10
@@ -433,7 +433,7 @@ class TestGdalUtils(TestCase):
             self.task_process().start_process.side_effect = Exception("Error")
             merge_geotiffs(in_files, out_file, task_uid=task_uid)
 
-    @patch("utils.gdalutils.gdal")
+    @patch("gdal_utils.utils.gdal.gdal")
     def test_get_band_statistics(self, mock_gdal):
         in_file = "test.tif"
         example_stats = [0, 10, 5, 2]
@@ -449,7 +449,7 @@ class TestGdalUtils(TestCase):
         ]
         self.assertIsNone(get_band_statistics(in_file))
 
-    @patch("utils.gdalutils.update_progress")
+    @patch("gdal_utils.utils.gdal.update_progress")
     def test_progress_callback(self, mock_update_progress):
         example_percentage = 0.10
         example_message = "message"
@@ -467,8 +467,8 @@ class TestGdalUtils(TestCase):
             msg=example_message,
         )
 
-    @patch("utils.gdalutils.get_dataset_names")
-    @patch("utils.gdalutils.gdal")
+    @patch("gdal_utils.utils.gdal.get_dataset_names")
+    @patch("gdal_utils.utils.gdal.gdal")
     def test_convert_raster(self, mock_gdal, mock_get_dataset_names):
         task_uid = "123"
         input_file = "/test/test.gpkg"
@@ -539,7 +539,7 @@ class TestGdalUtils(TestCase):
             translate="params",
         )
 
-    @patch("utils.gdalutils.gdal")
+    @patch("gdal_utils.utils.gdal.gdal")
     def test_convert_vector(self, mock_gdal):
         task_uid = "123"
         input_file = "/test/test.gpkg"
