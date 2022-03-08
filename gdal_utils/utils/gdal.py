@@ -101,7 +101,7 @@ def cleanup_dataset(dataset):
         del dataset
 
 
-@retry
+@retry()
 def get_meta(ds_path, is_raster=True):
     """
     This function is a wrapper for the get_gdal metadata because if there is a database diconnection there is no obvious
@@ -264,7 +264,7 @@ def is_envelope(geojson_path):
         return False
 
 
-@retry
+@retry()
 def convert(
     boundary=None,
     input_files: Optional[List[str]] = None,
