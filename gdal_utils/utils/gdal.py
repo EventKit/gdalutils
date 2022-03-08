@@ -2,14 +2,14 @@
 import json
 import logging
 import math
-from multiprocessing.dummy import Process, Queue
 import os
 from contextlib import contextmanager
 from itertools import repeat
+from multiprocessing.dummy import Process, Queue
 from statistics import mean
 from tempfile import NamedTemporaryFile
-from typing import List, Tuple, TypedDict
-from zipfile import ZipFile, ZIP_DEFLATED
+from typing import List, Optional, Tuple, TypedDict
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from django.contrib.gis.geos import Polygon
 from mapproxy.grid import tile_grid
@@ -23,7 +23,12 @@ logger = logging.getLogger(__name__)
 
 MAX_DB_CONNECTION_RETRIES = 1
 TIME_DELAY_BASE = 2  # Used for exponential delays (i.e. 5^y) at 8 would be about 4 minutes 15 seconds max delay.
-GOOGLE_MAPS_FULL_WORLD = [-20037508.342789244, -20037508.342789244, 20037508.342789244, 20037508.342789244]
+GOOGLE_MAPS_FULL_WORLD = [
+    -20037508.342789244,
+    -20037508.342789244,
+    20037508.342789244,
+    20037508.342789244,
+]
 
 
 def progress_callback(pct, msg, user_data):
@@ -48,38 +53,37 @@ def open_dataset(file_path, is_raster):
     # Using gdal exception to minimize output to stdout
     gdal.UseExceptions()
 
-    logger.info("Opening the dataset: {}".format(file_path))
+    logger.info("Opening the dataset: %s", file_path)
     gdal_dataset = None
     ogr_dataset = None
     try:
         try:
             gdal_dataset = gdal.Open(file_path)
-        except Exception as e:
-            logger.debug("Could not open dataset using gdal as raster.")
-            logger.debug(e)
-        finally:
-            if gdal_dataset and is_raster:
-                logger.info(f"The dataset: {file_path} opened with gdal.")
-                return gdal_dataset
+        except Exception:
+            logger.debug("Could not open dataset using gdal as raster.", exc_info=True)
+
+        if gdal_dataset and is_raster:
+            logger.info("The dataset: %s opened with gdal.", file_path)
+            return gdal_dataset
 
         # Attempt to open as ogr dataset (vector)
         # ogr.UseExceptions doesn't seem to work reliably, so just check for Open returning None
         try:
             ogr_dataset = ogr.Open(file_path)
-        except Exception as e:
-            logger.debug("Could not open dataset using ogr.")
-            logger.debug(e)
-        finally:
-            if not ogr_dataset:
-                logger.debug("Unknown file format: {0}".format(file_path))
-            else:
-                logger.info(f"The dataset: {file_path} opened with ogr.")
-            return ogr_dataset or gdal_dataset
-    except RuntimeError as ex:
-        if ("not recognized as a supported file format" not in str(ex)) or (
-            "Error browsing database for PostGIS Raster tables" in str(ex)
+        except Exception:
+            logger.debug("Could not open dataset using ogr.", exc_info=True)
+
+        if not ogr_dataset:
+            logger.debug("Unknown file format: %s", file_path)
+        else:
+            logger.info("The dataset: %s opened with ogr.", file_path)
+        return ogr_dataset or gdal_dataset
+    except RuntimeError as exc:
+        if ("not recognized as a supported file format" not in str(exc)) or (
+            "Error browsing database for PostGIS Raster tables" in str(exc)
         ):
-            raise ex
+            raise exc
+        return None
     finally:
         cleanup_dataset(gdal_dataset)
         cleanup_dataset(ogr_dataset)
@@ -92,7 +96,7 @@ def cleanup_dataset(dataset):
     :param resources: Dataset / DataSource to destroy
     """
     if dataset:
-        logger.info("Closing the resources: {}.".format(dataset))
+        logger.info("Closing the resources: %s.", dataset)
         # https://trac.osgeo.org/gdal/wiki/PythonGotchas#CertainobjectscontainaDestroymethodbutyoushouldneveruseit
         del dataset
 
@@ -115,7 +119,9 @@ def get_meta(ds_path, is_raster=True):
     """
 
     multiprocess_queue: Queue = Queue()
-    proc = Process(target=get_gdal_metadata, args=(ds_path, is_raster, multiprocess_queue))
+    proc = Process(
+        target=get_gdal_metadata, args=(ds_path, is_raster, multiprocess_queue)
+    )
     proc.start()
     proc.join()
     return multiprocess_queue.get()
@@ -133,7 +139,16 @@ def get_gdal_metadata(ds_path, is_raster, multiprocess_queue):
     """
 
     dataset = None
-    ret = {"driver": None, "is_raster": None, "nodata": None}
+    ret_type = TypedDict(
+        "ret_type",
+        {
+            "driver": Optional[str],
+            "is_raster": Optional[bool],
+            "nodata": Optional[float],
+        },
+    )
+
+    ret: ret_type = {"driver": None, "is_raster": None, "nodata": None}
 
     try:
         dataset = open_dataset(ds_path, is_raster)
@@ -145,14 +160,19 @@ def get_gdal_metadata(ds_path, is_raster, multiprocess_queue):
             ret["driver"] = dataset.GetDriver().ShortName
             ret["is_raster"] = True
             if dataset.RasterCount:
-                bands = list(set([dataset.GetRasterBand(i + 1).GetNoDataValue() for i in range(dataset.RasterCount)]))
+                bands = list(
+                    {
+                        dataset.GetRasterBand(i + 1).GetNoDataValue()
+                        for i in range(dataset.RasterCount)
+                    }
+                )
                 if len(bands) == 1:
                     ret["nodata"] = bands[0]
 
         if ret["driver"]:
-            logger.debug("Identified dataset {0} as {1}".format(ds_path, ret["driver"]))
+            logger.debug("Identified dataset %s as %s", ds_path, ret["driver"])
         else:
-            logger.debug("Could not identify dataset {0}".format(ds_path))
+            logger.debug("Could not identify dataset %s", ds_path)
 
         multiprocess_queue.put(ret)
     finally:
@@ -170,8 +190,8 @@ def get_area(geojson):
     """
     earth_r = 6371  # km
 
-    def rad(d):
-        return math.pi * d / 180
+    def rad(degrees):
+        return math.pi * degrees / 180
 
     if isinstance(geojson, str):
         geojson = json.loads(geojson)
@@ -185,7 +205,7 @@ def get_area(geojson):
     elif geom_type == "multipolygon":
         polys = geojson["coordinates"]
     else:
-        return RuntimeError("Invalid geometry type: %s" % geom_type)
+        return RuntimeError(f"Invalid geometry type: {geom_type}")
 
     a = 0
     for poly in polys:
@@ -211,8 +231,8 @@ def is_envelope(geojson_path):
         if not os.path.isfile(geojson_path) and isinstance(geojson_path, str):
             geojson = json.loads(geojson_path)
         else:
-            with open(geojson_path, "r") as gf:
-                geojson = json.load(gf)
+            with open(geojson_path, encoding="UTF-8") as geojson_file:
+                geojson = json.load(geojson_file)
 
         geom_type = geojson["type"].lower()
         if geom_type == "polygon":
@@ -234,10 +254,12 @@ def is_envelope(geojson_path):
             return False  # Envelopes need exactly four valid coordinates
 
         # Envelopes will have exactly two unique coordinates, for both x and y, out of those four
-        ret = len(set([coord[0] for coord in ring])) == len(set([coord[1] for coord in ring])) == 2
+        ret = (
+            len({coord[0] for coord in ring}) == len({coord[1] for coord in ring}) == 2
+        )
         return ret
 
-    except (IndexError, IOError, ValueError):
+    except (IndexError, OSError, ValueError):
         # Unparseable JSON or unreadable file: play it safe
         return False
 
@@ -245,8 +267,8 @@ def is_envelope(geojson_path):
 @retry
 def convert(
     boundary=None,
-    input_file=None,
-    output_file=None,
+    input_files: Optional[List[str]] = None,
+    output_file: Optional[str] = None,
     src_srs=4326,
     driver=None,
     layers=None,
@@ -273,7 +295,7 @@ def convert(
     :param warp_params: A dict of params to pass into gdal warp.
     :param is_raster: A explicit declaration that dataset is raster (for disambiguating mixed mode files...gpkg)
     :param boundary: A geojson file or bbox (xmin, ymin, xmax, ymax) to serve as a cutline
-    :param input_file: A raster or vector file to be clipped
+    :param input_files: A raster or vector file to be clipped
     :param output_file: The dataset to put the clipped output in (if not specified will use in_dataset)
     :param driver: Short name of output driver to use (defaults to input format)
     :param layer_name: Table name in database for in_dataset
@@ -285,13 +307,16 @@ def convert(
     :return: Filename of clipped dataset
     """
 
-    if isinstance(input_file, str) and not use_translate:
-        input_file = [input_file]
+    if not input_files:
+        raise Exception("No input files specified")
+
+    if isinstance(input_files, str) and not use_translate:
+        input_files = [input_files]
 
     meta_list = []
-    for _index, _file in enumerate(input_file):
-        input_file[_index], output_file = get_dataset_names(_file, output_file)
-        meta_list.append(get_meta(input_file[_index], is_raster))
+    for _index, _file in enumerate(input_files):
+        input_files[_index], output_file = get_dataset_names(_file, output_file)
+        meta_list.append(get_meta(input_files[_index], is_raster))
 
     src_src = f"EPSG:{src_srs}"
     dst_src = f"EPSG:{projection}"
@@ -316,7 +341,9 @@ def convert(
         # Strings are expected to be a file.
         if isinstance(boundary, str):
             if not os.path.isfile(boundary):
-                raise Exception(f"Called convert using a boundary of {boundary} but no such path exists.")
+                raise Exception(
+                    f"Called convert using a boundary of {boundary} but no such path exists."
+                )
         elif is_valid_bbox(boundary):
             geojson = bbox2polygon(boundary)
             bbox = boundary
@@ -331,7 +358,7 @@ def convert(
     if meta["is_raster"]:
         cmd = get_task_command(
             convert_raster,
-            input_file,
+            input_files,
             output_file,
             driver=driver,
             creation_options=creation_options,
@@ -349,7 +376,7 @@ def convert(
     else:
         cmd = get_task_command(
             convert_vector,
-            input_file,
+            input_files,
             output_file,
             driver=driver,
             dataset_creation_options=dataset_creation_options,
@@ -372,16 +399,18 @@ def convert(
         # If we don't allow cancel exception to propagate then the task won't exit properly.
         # TODO: Allow retry state to be more informed.
         raise
-    except Exception as e:
-        logger.error(e)
-        raise Exception("File conversion failed. Please try again or contact support.")
+    except Exception as exc:
+        logger.error(exc)
+        raise Exception(
+            "File conversion failed. Please try again or contact support."
+        ) from exc
 
     finally:
         if temp_boundfile:
             temp_boundfile.close()
 
     if requires_zip(driver):
-        logger.debug(f"Requires zip: {output_file}")
+        logger.debug("Requires zip: %s", output_file)
         output_file = create_zip_file(output_file, get_zip_name(output_file))
 
     return output_file
@@ -414,8 +443,10 @@ def get_dataset_names(input_file, output_file):
     return input_file, output_file
 
 
-def clean_options(options):
-    return {option: value for option, value in options.items() if value is not None}
+def clean_options(options: dict) -> dict:
+    if options:
+        return {option: value for option, value in options.items() if value is not None}
+    return {}
 
 
 def convert_raster(
@@ -430,8 +461,8 @@ def convert_raster(
     src_srs=None,
     dst_srs=None,
     task_uid=None,
-    warp_params: dict = None,
-    translate_params: dict = None,
+    warp_params: Optional[dict] = None,
+    translate_params: Optional[dict] = None,
     use_translate: bool = False,
     config_options: List[Tuple[str]] = None,
 ):
@@ -470,35 +501,51 @@ def convert_raster(
     options = clean_options(
         {
             "callback": progress_callback,
-            "callback_data": {"task_uid": task_uid, "subtask_percentage": subtask_percentage},
+            "callback_data": {
+                "task_uid": task_uid,
+                "subtask_percentage": subtask_percentage,
+            },
             "creationOptions": creation_options,
             "format": driver,
         }
     )
     if not warp_params:
         warp_params = clean_options(
-            {"outputType": band_type, "dstAlpha": dst_alpha, "srcSRS": src_srs, "dstSRS": dst_srs}
+            {
+                "outputType": band_type,
+                "dstAlpha": dst_alpha,
+                "srcSRS": src_srs,
+                "dstSRS": dst_srs,
+            }
         )
     if not translate_params:
-        translate_params = dict()
+        translate_params = {}
     if boundary:
         warp_params.update({"cutlineDSName": boundary, "cropToCutline": True})
     # Keep the name imagery which is used when seeding the geopackages.
     # Needed because arcpy can't change table names.
     if driver.lower() == "gpkg":
-        options["creationOptions"] = options.get("creationOptions", []) + ["RASTER_TABLE=imagery"]
+        options["creationOptions"] = options.get("creationOptions", []) + [
+            "RASTER_TABLE=imagery"
+        ]
 
     if use_translate:
         logger.info(
-            f"calling gdal.Translate('{output_file}', {input_files}'),"
-            f"{stringify_params(options)}, {stringify_params(warp_params)},)"
+            "calling gdal.Translate(%s, %s, %s, %s)",
+            output_file,
+            input_files,
+            stringify_params(options),
+            stringify_params(warp_params),
         )
         options.update(translate_params)
         gdal.Translate(output_file, input_files, **options)
     else:
         logger.info(
-            f"calling gdal.Warp('{output_file}', [{', '.join(input_files)}],"
-            f"{stringify_params(options)}, {stringify_params(warp_params)},)"
+            "calling gdal.Warp(%s, %s, %s, %s)",
+            output_file,
+            [", ".join(input_files)],
+            stringify_params(options),
+            stringify_params(warp_params),
         )
         gdal.Warp(output_file, input_files, **options, **warp_params)
 
@@ -510,15 +557,22 @@ def convert_raster(
         if translate_params:
             options.update(translate_params)
         else:
-            options.update({"creationOptions": ["COMPRESS=LZW", "TILED=YES", "BIGTIFF=YES"]})
+            options.update(
+                {"creationOptions": ["COMPRESS=LZW", "TILED=YES", "BIGTIFF=YES"]}
+            )
 
-        logger.info(f"calling gdal.Translate('{output_file}', '{input_file}', " f"{stringify_params(options)},)")
+        logger.info(
+            "calling gdal.Translate(%s, %s, %s)",
+            output_file,
+            input_file,
+            stringify_params(options),
+        )
         gdal.Translate(output_file, input_file, **options)
     return output_file
 
 
 def convert_vector(
-    input_file,
+    input_files,
     output_file,
     driver=None,
     access_mode="overwrite",
@@ -553,12 +607,12 @@ def convert_vector(
     :param distinct_field: A field for selecting distinct features to prevent duplicates.
     :return: The output file.
     """
-    if isinstance(input_file, str) and access_mode == "append":
-        input_file = [input_file]
-    elif isinstance(input_file, list) and access_mode == "overwrite":
+    if isinstance(input_files, str) and access_mode == "append":
+        input_files = [input_files]
+    elif isinstance(input_files, list) and access_mode == "overwrite":
         # If a single file is provided in an array, we can simply pull it out
-        if len(input_file) == 1:
-            input_file = input_file[0]
+        if len(input_files) == 1:
+            input_files = input_files[0]
         else:
             raise Exception("Cannot overwrite with a list of files.")
     gdal.UseExceptions()
@@ -586,25 +640,43 @@ def convert_vector(
         for config_option in config_options:
             gdal.SetConfigOption(*config_option)
     if access_mode == "append":
-        for _input_file in input_file:
-            logger.info(f"calling gdal.VectorTranslate('{output_file}', '{_input_file}', {stringify_params(options)})")
+        for _input_file in input_files:
+            logger.info(
+                "calling gdal.VectorTranslate(%s, %s, %s)",
+                output_file,
+                input_files,
+                stringify_params(options),
+            )
             gdal.VectorTranslate(output_file, _input_file, **options)
     else:
-        logger.info(f"calling gdal.VectorTranslate('{output_file}', '{input_file}', {stringify_params(options)})")
-        gdal.VectorTranslate(output_file, input_file, **options)
+        logger.info(
+            "calling gdal.VectorTranslate(%s, %s, %s)",
+            output_file,
+            input_files,
+            stringify_params(options),
+        )
+        gdal.VectorTranslate(output_file, input_files, **options)
 
     if distinct_field:
-        logger.error(f"Normalizing features based on field: {distinct_field}")
+        logger.error("Normalizing features based on field: %s", distinct_field)
         table_name = layer_name or os.path.splitext(os.path.basename(output_file))[0]
-        options["SQLStatement"] = f"SELECT * from '{table_name}' GROUP BY '{distinct_field}'"
-        options["SQLDialect"] = "sqlite"
-        logger.error(f"calling gdal.VectorTranslate('{output_file}', '{output_file}', {stringify_params(options)})")
+        options[
+            "SQLStatement"
+        ] = f"SELECT * from '{table_name}' GROUP BY '{distinct_field}'"
+        logger.error(
+            "calling gdal.VectorTranslate(%s, %s, %s)",
+            output_file,
+            output_file,
+            stringify_params(options),
+        )
         gdal.VectorTranslate(output_file, rename_duplicate(output_file), **options)
 
     return output_file
 
 
-def polygonize(input_file: str, output_file: str, output_type: str = "GeoJSON", band: int = None):
+def polygonize(
+    input_file: str, output_file: str, output_type: str = "GeoJSON", band: int = None
+):
     """
     Polygonization groups similar pixel values into bins and draws a boundary around them.
     This is often used as a way to display raster information in a vector format. That can still be done here,
@@ -639,7 +711,12 @@ def polygonize(input_file: str, output_file: str, output_type: str = "GeoJSON", 
 
                 # Convert to geotiff so that we can remove black pixels and use alpha mask for the polygon.
                 tmp_file = "/vsimem/tmp.tif"
-                convert_raster(nb_file, tmp_file, driver="gtiff", warp_params={"dstAlpha": True, "srcNodata": "0 0 0"})
+                convert_raster(
+                    nb_file,
+                    tmp_file,
+                    driver="gtiff",
+                    warp_params={"dstAlpha": True, "srcNodata": "0 0 0"},
+                )
 
                 del nb_file
                 src_ds = gdal.Open(tmp_file)
@@ -649,9 +726,9 @@ def polygonize(input_file: str, output_file: str, output_type: str = "GeoJSON", 
             else:
                 band_index = 1
         mask_band = src_ds.GetRasterBand(band_index)
-    except RuntimeError as e:
-        logger.error(e)
-        raise Exception("Unable to get raster band.")
+    except RuntimeError as exc:
+        logger.error(exc)
+        raise Exception("Unable to get raster band.") from exc
 
     drv = ogr.GetDriverByName(output_type)
     dst_ds = drv.CreateDataSource(output_file)
@@ -670,7 +747,7 @@ def stringify_params(params):
     return ", ".join([f"{k}='{v}'" for k, v in params.items()])
 
 
-def get_dimensions(bbox: List[float], scale: int) -> (int, int):
+def get_dimensions(bbox: List[float], scale: int) -> Tuple[int, int]:
     """
     :param bbox: A list [w, s, e, n].
     :param scale: A scale in meters per pixel.
@@ -762,14 +839,16 @@ def merge_geotiffs(in_files, out_file, task_uid=None):
     :param task_uid: A task uid to track the conversion.
     :return: The out_file path.
     """
-    cmd = get_task_command(convert_raster, in_files, out_file, task_uid=task_uid, driver="gtiff")
+    cmd = get_task_command(
+        convert_raster, in_files, out_file, task_uid=task_uid, driver="gtiff"
+    )
 
     try:
         task_process = TaskProcess(task_uid=task_uid)
         task_process.start_process(cmd)
-    except Exception as e:
-        logger.error(e)
-        raise Exception("GeoTIFF merge process failed.")
+    except Exception as exc:
+        logger.error(exc)
+        raise Exception("GeoTIFF merge process failed.") from exc
 
     return out_file
 
@@ -787,18 +866,18 @@ def merge_geojson(in_files, out_file):
         out_layer = out_ds.CreateLayer(out_file)
 
         for file in in_files:
-            ds = ogr.Open(file)
-            lyr = ds.GetLayer()
-            for feat in lyr:
+            data_source = ogr.Open(file)
+            layer = data_source.GetLayer()
+            for feat in layer:
                 out_feat = ogr.Feature(out_layer.GetLayerDefn())
                 out_feat.SetGeometry(feat.GetGeometryRef().Clone())
                 out_layer.CreateFeature(out_feat)
                 out_feat = None  # NOQA
                 out_layer.SyncToDisk()
         out_ds = None  # NOQA
-    except Exception as e:
-        logger.error(e)
-        raise Exception("File merge process failed.")
+    except Exception as exc:
+        logger.error(exc)
+        raise Exception("File merge process failed.") from exc
 
     return out_file
 
@@ -816,9 +895,9 @@ def get_band_statistics(file_path, band=1):
         image_file = gdal.Open(file_path)
         raster_band = image_file.GetRasterBand(band)
         return raster_band.GetStatistics(False, True)
-    except Exception as e:
-        logger.error(e)
-        logger.error("Could not get statistics for {0}:{1}".format(file_path, raster_band))
+    except Exception as exc:
+        logger.error(exc)
+        logger.error("Could not get statistics for %s:%s", file_path, raster_band)
         return None
     finally:
         # Need to close the dataset.
@@ -831,20 +910,25 @@ def rename_duplicate(original_file: str) -> str:
     # create duplicates of it and the gdal driver doesn't support writing PBF anyway, so this is likely a mistake.
     protected_files = [".pbf"]
     if os.path.splitext(original_file)[1] in protected_files:
-        raise Exception(f"The {original_file} cannot be renamed it is protected and/or not writable by this module.")
-    returned_file = os.path.join(os.path.dirname(original_file), "old_{0}".format(os.path.basename(original_file)))
+        raise Exception(
+            f"The {original_file} cannot be renamed it is protected and/or not writable by this module."
+        )
+    returned_file = os.path.join(
+        os.path.dirname(original_file),
+        f"old_{os.path.basename(original_file)}",
+    )
     # if the original and renamed files both exist, we can remove the renamed version, and then rename the file.
     if os.path.isfile(returned_file) and os.path.isfile(original_file):
         os.remove(returned_file)
     # If the original file doesn't exist but the renamed version does, then something failed after a rename, and
     # this is now retrying the operation.
     if not os.path.isfile(returned_file):
-        logger.info("Renaming '{}' to '{}'".format(original_file, returned_file))
+        logger.info("Renaming %s to %s", original_file, returned_file)
         os.rename(original_file, returned_file)
     return returned_file
 
 
-def strip_prefixes(dataset: str) -> (str, str):
+def strip_prefixes(dataset: str) -> Tuple[str, str]:
     prefixes = ["GTIFF_RAW:"]
     removed_prefix = ""
     output_dataset = dataset
@@ -891,7 +975,9 @@ def get_chunked_bbox(bbox, size: tuple = None, level: int = None):
     resolution = get_resolution_for_extent(bbox, size)
     # Make a subgrid of 4326 that spans the extent of the provided bbox
     # min res specifies the starting zoom level
-    mapproxy_grid = tile_grid(srs=4326, bbox=bbox, bbox_srs=4326, origin="ul", min_res=resolution)
+    mapproxy_grid = tile_grid(
+        srs=4326, bbox=bbox, bbox_srs=4326, origin="ul", min_res=resolution
+    )
     # bbox is the bounding box of all tiles affected at the given level, unused here
     # size is the x, y dimensions of the grid
     # tiles at level is a generator that returns the tiles in order
@@ -918,10 +1004,17 @@ class ArcGISExtent(TypedDict):
 
 def get_polygon_from_arcgis_extent(extent: ArcGISExtent):
     spatial_reference = extent.get("spatialReference", {})
-    bbox = [extent.get("xmin"), extent.get("ymin"), extent.get("xmax"), extent.get("ymax")]
+    bbox = [
+        extent.get("xmin"),
+        extent.get("ymin"),
+        extent.get("xmax"),
+        extent.get("ymax"),
+    ]
     try:
         polygon = Polygon.from_bbox(bbox)
-        polygon.srid = spatial_reference.get("latestWkid") or spatial_reference.get("wkid") or 4326
+        polygon.srid = (
+            spatial_reference.get("latestWkid") or spatial_reference.get("wkid") or 4326
+        )
         polygon.transform(4326)
         return polygon
     except Exception:
@@ -982,7 +1075,9 @@ def get_file_paths(directory):
     with cd(directory):
         for dirpath, _, filenames in os.walk("/"):
             for f in filenames:
-                paths[os.path.abspath(os.path.join(dirpath, f))] = os.path.join(dirpath, f)
+                paths[os.path.abspath(os.path.join(dirpath, f))] = os.path.join(
+                    dirpath, f
+                )
     return paths
 
 
@@ -1007,7 +1102,9 @@ def create_zip_file(in_file, out_file):
             file_paths = get_file_paths(in_file)
             for absolute_file_path, relative_file_path in file_paths.items():
                 if os.path.isfile(absolute_file_path):
-                    zipfile.write(absolute_file_path, arcname=os.path.basename(relative_file_path))
+                    zipfile.write(
+                        absolute_file_path, arcname=os.path.basename(relative_file_path)
+                    )
         else:
             zipfile.write(in_file)
     return out_file

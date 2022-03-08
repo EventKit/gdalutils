@@ -10,7 +10,13 @@ pylint:
 flake8:
 	flake8
 
-lint: black flake8 pylint
+isort:
+	isort .
+
+mypy:
+	mypy gdal_utils
+
+lint: black flake8 mypy pylint
 
 test:
 	DJANGO_SETTINGS_MODULE=config.settings coverage run -m pytest -vvv

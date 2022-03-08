@@ -1,10 +1,7 @@
 import logging
-import os
-import shutil
 import time
 from functools import wraps
-from pathlib import Path
-from typing import Tuple, Optional
+from typing import Optional
 
 from django.conf import settings
 from django.core.cache import cache
@@ -46,6 +43,7 @@ def retry(base=2, count=1):
         return wrapper
 
     return decorator
+
 
 def get_cache_key(obj=None, attribute=None, uid=None):
     """
@@ -149,69 +147,3 @@ def update_progress(
             attribute="estimated_finish",
             value=eta.eta_datetime(),
         )
-
-
-def get_run_staging_dir(run_uid):
-    """
-    The run staging dir is where all files are stored while they are being processed.
-    It is a unique space to ensure that files aren't being improperly modified.
-    :param run_uid: The unique value to store the directory for the run data.
-    :return: The path to the run directory.
-    """
-    return os.path.join(settings.EXPORT_STAGING_ROOT.removesuffix("/"), str(run_uid))
-
-
-def get_download_path(folder_name):
-    """
-    The download dir is where all files are stored after they are processed.
-    It is a unique space to ensure that files aren't being improperly modified.
-    :param file_path: The unique value to store the directory for the data.
-    :return: The path to the directory.
-    """
-    return os.path.join(
-        settings.EXPORT_DOWNLOAD_ROOT.removesuffix("/"), str(folder_name)
-    )
-
-
-def get_download_url(file_name):
-    """
-    A URL path to the run data
-    :param run_uid: The unique identifier for the run data.
-    :return: The url context. (e.g. /downloads/123e4567-e89b-12d3-a456-426655440000)
-    """
-    return f"{settings.EXPORT_MEDIA_ROOT.rstrip('/')}/{str(file_name)}"
-
-
-def make_file_downloadable(file_path: Path) -> Tuple[Path, str]:
-    """Construct the filesystem location and url needed to download the file at filepath.
-    Copy filepath to the filesystem location required for download.
-    @return A url to reach filepath.
-    """
-
-    # File name is the relative path, e.g. run/provider_slug/file.ext.
-    # File path is an absolute path e.g. /var/lib/eventkit/export_stage/run/provider_slug/file.ext.
-    file_name = Path(file_path)
-    if Path(settings.EXPORT_STAGING_ROOT) in file_name.parents:
-        file_name = file_name.relative_to(settings.EXPORT_STAGING_ROOT)
-
-    download_url = get_download_url(file_name)
-
-    download_path = get_download_path(file_name)
-    make_dirs(os.path.dirname(download_path))
-
-    if not os.path.isfile(file_path):
-        logger.error(
-            "Cannot make file %s downloadable because it does not exist.", file_path
-        )
-    else:
-        shutil.copy(file_path, download_path)
-
-    return file_name, download_url
-
-
-def make_dirs(path):
-    try:
-        os.makedirs(path, 0o751, exist_ok=True)
-    except OSError:
-        if not os.path.isdir(path):
-            raise
