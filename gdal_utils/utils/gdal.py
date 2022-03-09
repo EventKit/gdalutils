@@ -11,8 +11,6 @@ from tempfile import NamedTemporaryFile
 from typing import List, Optional, Tuple, TypedDict
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from django.contrib.gis.geos import Polygon
-from mapproxy.grid import tile_grid
 from osgeo import gdal, ogr, osr
 
 from gdal_utils.utils.exceptions import CancelException
@@ -961,66 +959,6 @@ def validate_bbox(bbox: list):
     return bbox
 
 
-def get_chunked_bbox(bbox, size: tuple = None, level: int = None):
-    """
-    Chunks a bbox into a grid of sub-bboxes.
-    :param bbox: bbox in 4326, representing the area of the world to be chunked
-    :param size: optional image size to use when calculating the resolution.
-    :param level:  The level to use for the affected level.
-    :return: enclosing bbox of the area, dimensions of the grid, bboxes of all tiles.
-    """
-
-    # Calculate the starting res for our custom grid
-    # This is the same method we used when taking snap shots for data packs
-    resolution = get_resolution_for_extent(bbox, size)
-    # Make a subgrid of 4326 that spans the extent of the provided bbox
-    # min res specifies the starting zoom level
-    mapproxy_grid = tile_grid(
-        srs=4326, bbox=bbox, bbox_srs=4326, origin="ul", min_res=resolution
-    )
-    # bbox is the bounding box of all tiles affected at the given level, unused here
-    # size is the x, y dimensions of the grid
-    # tiles at level is a generator that returns the tiles in order
-    tiles_at_level = mapproxy_grid.get_affected_level_tiles(bbox, 0)[2]
-    # convert the tiles to bboxes representing the tiles on the map
-    return [mapproxy_grid.tile_bbox(_tile) for _tile in tiles_at_level]
-
-
-class _ArcGISSpatialReference(TypedDict):
-    wkid: int
-
-
-class ArcGISSpatialReference(_ArcGISSpatialReference, total=False):
-    latestWkid: int
-
-
-class ArcGISExtent(TypedDict):
-    xmin: float
-    ymin: float
-    xmax: float
-    ymax: float
-    spatialReference: ArcGISSpatialReference
-
-
-def get_polygon_from_arcgis_extent(extent: ArcGISExtent):
-    spatial_reference = extent.get("spatialReference", {})
-    bbox = [
-        extent.get("xmin"),
-        extent.get("ymin"),
-        extent.get("xmax"),
-        extent.get("ymax"),
-    ]
-    try:
-        polygon = Polygon.from_bbox(bbox)
-        polygon.srid = (
-            spatial_reference.get("latestWkid") or spatial_reference.get("wkid") or 4326
-        )
-        polygon.transform(4326)
-        return polygon
-    except Exception:
-        return Polygon.from_bbox([-180, -90, 180, 90])
-
-
 def is_valid_bbox(bbox):
     if not isinstance(bbox, list) or len(bbox) != 4:
         return False
@@ -1115,34 +1053,3 @@ def get_zip_name(file_name):
     if ext == ".kml":
         return basename + ".kmz"
     return basename + ".zip"
-
-
-def get_resolution_for_extent(extent: list, size: tuple = None):
-    """
-    :param extent: A bounding box as a list [w,s,e,n].
-    :param optional size: The pixel size of the image to get the resolution for as a tuple.
-    :return: The resolution at which the extent will render at the given size.
-    """
-    if size is None:
-        size = (1024, 512)
-
-    size_x, size_y = size
-    x_resolution = get_width(extent) / size_x
-    y_resolution = get_height(extent) / size_y
-    return max([x_resolution, y_resolution])
-
-
-def get_width(extent: list):
-    """
-    :param extent: A bounding box as a list [w,s,e,n].
-    :return: The width of the given extent.
-    """
-    return extent[2] - extent[0]
-
-
-def get_height(extent: list):
-    """
-    :param extent: A bounding box as a list [w,s,e,n].
-    :return: The height of the given extent.
-    """
-    return extent[3] - extent[1]

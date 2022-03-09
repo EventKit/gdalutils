@@ -5,5 +5,3 @@ dependencies:
   - Django==3.2.7
   - GDAL=3.2.1
   - proj=7.1.1
-  - pip:
-      - MapProxy==1.13.2
