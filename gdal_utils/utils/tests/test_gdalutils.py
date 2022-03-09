@@ -1,9 +1,9 @@
 import logging
 import os
-from unittest.mock import ANY, MagicMock, Mock, call, patch
+from unittest import TestCase
+from unittest.mock import ANY, call, MagicMock, Mock, patch
 from uuid import uuid4
 
-from django.test import TestCase
 from osgeo import gdal, ogr
 
 from gdal_utils.utils.gdal import (
