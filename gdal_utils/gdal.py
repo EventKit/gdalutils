@@ -13,10 +13,6 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from osgeo import gdal, ogr, osr
 
-from gdal_utils.exceptions import CancelException
-from gdal_utils.helpers import retry
-from gdal_utils.task_process import TaskProcess
-
 logger = logging.getLogger(__name__)
 
 MAX_DB_CONNECTION_RETRIES = 1
@@ -89,12 +85,11 @@ def cleanup_dataset(dataset):
         del dataset
 
 
-@retry()
 def get_meta(ds_path, is_raster=True):
     """
-    This function is a wrapper for the get_gdal metadata because if there is a database diconnection there is no obvious
-    way to clean up and free those resources therefore it is put on a separate process and if it fails it can just be
-    tried again.
+    This function is a wrapper for the get_gdal metadata because if there is a database disconnection there is no
+    obvious way to clean up and free those resources therefore it is put on a separate process and if it fails it can
+    just be tried again.
 
     This is using GDAL 2.2.4 this should be checked again to see if it can be simplified in a later version.
     :param ds_path: String: Path to dataset
@@ -252,7 +247,6 @@ def is_envelope(geojson_path):
         return False
 
 
-@retry()
 def convert(
     boundary=None,
     input_files: Optional[List[str]] = None,
@@ -261,7 +255,6 @@ def convert(
     driver=None,
     layers=None,
     layer_name=None,
-    task_uid=None,
     projection: int = 4326,
     creation_options: list = None,
     dataset_creation_options: list = None,
@@ -273,6 +266,7 @@ def convert(
     access_mode: str = "overwrite",
     config_options: List[Tuple[str]] = None,
     distinct_field=None,
+    executor=None,
 ):
     """
     Uses gdal to convert and clip a supported dataset file to a mask if boundary is passed in.
@@ -288,7 +282,6 @@ def convert(
     :param driver: Short name of output driver to use (defaults to input format)
     :param layer_name: Table name in database for in_dataset
     :param layers: A list of layers to include for translation.
-    :param task_uid: A task uid to update
     :param projection: A projection as an int referencing an EPSG code (e.g. 4326 = EPSG:4326)
     :param creation_options: Additional options to pass to the convert method (e.g. "-co SOMETHING")
     :param config_options: A list of gdal configuration options as a tuple (option, value).
@@ -344,7 +337,7 @@ def convert(
             boundary = temp_boundfile.name
 
     if meta["is_raster"]:
-        cmd = get_task_command(
+        task_command = get_task_command(
             convert_raster,
             input_files,
             output_file,
@@ -355,14 +348,13 @@ def convert(
             boundary=boundary,
             src_srs=src_src,
             dst_srs=dst_src,
-            task_uid=task_uid,
             warp_params=warp_params,
             translate_params=translate_params,
             use_translate=use_translate,
             config_options=config_options,
         )
     else:
-        cmd = get_task_command(
+        task_command = get_task_command(
             convert_vector,
             input_files,
             output_file,
@@ -373,29 +365,20 @@ def convert(
             dst_srs=dst_src,
             layers=layers,
             layer_name=layer_name,
-            task_uid=task_uid,
             boundary=boundary,
             bbox=bbox,
             access_mode=access_mode,
             config_options=config_options,
             distinct_field=distinct_field,
         )
-    try:
-        task_process = TaskProcess(task_uid=task_uid)
-        task_process.start_process(cmd)
-    except CancelException:
-        # If we don't allow cancel exception to propagate then the task won't exit properly.
-        # TODO: Allow retry state to be more informed.
-        raise
-    except Exception as exc:
-        logger.error(exc)
-        raise Exception(
-            "File conversion failed. Please try again or contact support."
-        ) from exc
 
-    finally:
-        if temp_boundfile:
-            temp_boundfile.close()
+    if executor:
+        executor(task_command)
+    else:
+        task_command()
+
+    if temp_boundfile:
+        temp_boundfile.close()
 
     if requires_zip(driver):
         logger.debug("Requires zip: %s", output_file)
@@ -448,7 +431,6 @@ def convert_raster(
     boundary=None,
     src_srs=None,
     dst_srs=None,
-    task_uid=None,
     warp_params: Optional[dict] = None,
     translate_params: Optional[dict] = None,
     use_translate: bool = False,
@@ -468,7 +450,6 @@ def convert_raster(
     :param boundary: The boundary to be used for clipping, this must be a file.
     :param src_srs: The srs of the source (e.g. "EPSG:4326")
     :param dst_srs: The srs of the destination (e.g. "EPSG:3857")
-    :param task_uid: The eventkit task uid used for tracking the work.
     :param use_translate: Make true if needing to use translate for conversion instead of warp.
     :param config_options: A list of gdal configuration options as a tuple (option, value).
     :return: The output file.
@@ -485,13 +466,7 @@ def convert_raster(
         else:
             raise Exception("Cannot use_translate with a list of files.")
     gdal.UseExceptions()
-    subtask_percentage = 50 if driver.lower() == "gtiff" else 100
-    options = clean_options(
-        {
-            "creationOptions": creation_options,
-            "format": driver,
-        }
-    )
+    options = clean_options({"creationOptions": creation_options, "format": driver})
     if not warp_params:
         warp_params = clean_options(
             {
@@ -561,7 +536,6 @@ def convert_vector(
     access_mode="overwrite",
     src_srs=None,
     dst_srs=None,
-    task_uid=None,
     layers=None,
     layer_name=None,
     boundary=None,
@@ -583,7 +557,6 @@ def convert_vector(
         This must be a file (i.e. a path as a string) and cannot be used with bbox.
     :param src_srs: The srs of the source (e.g. "EPSG:4326")
     :param dst_srs: The srs of the destination (e.g. "EPSG:3857")
-    :param task_uid: The eventkit task uid used for tracking the work.
     :param layers: A list of layers to include for translation.
     :param layer_name: Table name in database for in_dataset
     :param config_options: A list of gdal configuration options as a tuple (option, value).
@@ -813,23 +786,21 @@ def get_transform(from_srs, to_srs):
     return osr.CoordinateTransformation(source, target)
 
 
-def merge_geotiffs(in_files, out_file, task_uid=None):
+def merge_geotiffs(in_files, out_file, executor=None):
     """
     :param in_files: A list of geotiffs.
     :param out_file: A location for the result of the merge.
-    :param task_uid: A task uid to track the conversion.
+    :param executor: A method to execute an arbitrary callable.
     :return: The out_file path.
     """
-    cmd = get_task_command(
-        convert_raster, in_files, out_file, task_uid=task_uid, driver="gtiff"
+    task_command = get_task_command(
+        convert_raster, in_files, out_file, driver="gtiff"
     )
 
-    try:
-        task_process = TaskProcess(task_uid=task_uid)
-        task_process.start_process(cmd)
-    except Exception as exc:
-        logger.error(exc)
-        raise Exception("GeoTIFF merge process failed.") from exc
+    if executor:
+        executor(task_command)
+    else:
+        task_command()
 
     return out_file
 
@@ -838,7 +809,6 @@ def merge_geojson(in_files, out_file):
     """
     :param in_files: A list of geojson files.
     :param out_file: A location for the result of the merge.
-    :param task_uid: A task uid to track the conversion.
     :return: The out_file path.
     """
     try:

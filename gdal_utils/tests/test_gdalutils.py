@@ -1,8 +1,7 @@
 import logging
 import os
 from unittest import TestCase
-from unittest.mock import ANY, call, MagicMock, Mock, patch
-from uuid import uuid4
+from unittest.mock import ANY, MagicMock, Mock, call, patch
 
 from osgeo import gdal, ogr
 
@@ -25,17 +24,12 @@ logger = logging.getLogger(__name__)
 class TestGdalUtils(TestCase):
     def setUp(self):
         self.path = os.path.dirname(os.path.realpath(__file__))
-        self.task_process_patcher = patch("gdal_utils.gdal.TaskProcess")
-        self.task_process = self.task_process_patcher.start()
-        self.addCleanup(self.task_process_patcher.stop)
-        self.task_uid = uuid4()
 
     @patch("gdal_utils.gdal.os.path.isfile")
     @patch("gdal_utils.gdal.open_dataset")
     def test_get_meta(self, open_dataset_mock, isfile):
         dataset_path = "/path/to/dataset"
         isfile.return_value = True
-        self.task_process.return_value = Mock(exitcode=0)
 
         mock_open_dataset = Mock(spec=gdal.Dataset)
         mock_open_dataset.RasterCount = 0
@@ -123,7 +117,7 @@ class TestGdalUtils(TestCase):
         driver = "gpkg"
         band_type = gdal.GDT_Byte
         dstalpha = True
-        lambda_mock = Mock()
+        lambda_mock = MagicMock()
         get_task_command_mock.return_value = lambda_mock
         get_meta_mock.return_value = {
             "driver": "gpkg",
@@ -136,7 +130,6 @@ class TestGdalUtils(TestCase):
             input_files=in_dataset,
             output_file=out_dataset,
             driver=driver,
-            task_uid=self.task_uid,
             projection=3857,
         )
         get_task_command_mock.assert_called_once_with(
@@ -151,14 +144,11 @@ class TestGdalUtils(TestCase):
             boundary=geojson_file,
             src_srs=in_projection,
             dst_srs=out_projection,
-            task_uid=self.task_uid,
             translate_params=None,
             warp_params=None,
             use_translate=False,
         )
         get_task_command_mock.reset_mock()
-        self.task_process().start_process.assert_called_once_with(lambda_mock)
-        self.task_process.reset_mock()
 
         # Geotiff
         driver = "gtiff"
@@ -175,7 +165,6 @@ class TestGdalUtils(TestCase):
             input_files=in_dataset,
             output_file=out_dataset,
             driver=driver,
-            task_uid=self.task_uid,
         )
         get_task_command_mock.assert_called_once_with(
             convert_raster,
@@ -189,14 +178,11 @@ class TestGdalUtils(TestCase):
             boundary=geojson_file,
             src_srs=in_projection,
             dst_srs=in_projection,
-            task_uid=self.task_uid,
             translate_params=None,
             warp_params=None,
             use_translate=False,
         )
         get_task_command_mock.reset_mock()
-        self.task_process().start_process.assert_called_once_with(lambda_mock)
-        self.task_process.reset_mock()
 
         # Geotiff with non-envelope polygon cutline
         is_envelope_mock.return_value = False
@@ -206,7 +192,6 @@ class TestGdalUtils(TestCase):
             input_files=in_dataset,
             output_file=out_dataset,
             driver=driver,
-            task_uid=self.task_uid,
         )
         get_task_command_mock.assert_called_once_with(
             convert_raster,
@@ -220,14 +205,11 @@ class TestGdalUtils(TestCase):
             boundary=geojson_file,
             src_srs=in_projection,
             dst_srs=in_projection,
-            task_uid=self.task_uid,
             translate_params=None,
             warp_params=None,
             use_translate=False,
         )
         get_task_command_mock.reset_mock()
-        self.task_process().start_process.assert_called_once_with(lambda_mock)
-        self.task_process.reset_mock()
 
         # Vector
         driver = "gpkg"
@@ -237,7 +219,6 @@ class TestGdalUtils(TestCase):
             input_files=in_dataset,
             output_file=out_dataset,
             driver=driver,
-            task_uid=self.task_uid,
         )
         get_task_command_mock.assert_called_once_with(
             convert_vector,
@@ -254,12 +235,9 @@ class TestGdalUtils(TestCase):
             access_mode="overwrite",
             boundary=geojson_file,
             bbox=None,
-            task_uid=self.task_uid,
             distinct_field=None,
         )
         get_task_command_mock.reset_mock()
-        self.task_process().start_process.assert_called_once_with(lambda_mock)
-        self.task_process.reset_mock()
 
         # Test that extra_parameters are added when converting to NITF.
         driver = "nitf"
@@ -274,7 +252,6 @@ class TestGdalUtils(TestCase):
             input_files=in_dataset,
             creation_options=extra_parameters,
             output_file=out_dataset,
-            task_uid=self.task_uid,
             projection=3857,
         )
         get_task_command_mock.assert_called_once_with(
@@ -289,14 +266,11 @@ class TestGdalUtils(TestCase):
             boundary=None,
             src_srs=in_projection,
             dst_srs=out_projection,
-            task_uid=self.task_uid,
             translate_params=None,
             warp_params=None,
             use_translate=False,
         )
         get_task_command_mock.reset_mock()
-        self.task_process().start_process.assert_called_once_with(lambda_mock)
-        self.task_process.reset_mock()
 
         # Test converting to a new projection
         driver = "gpkg"
@@ -309,7 +283,6 @@ class TestGdalUtils(TestCase):
             driver=driver,
             input_files=in_dataset,
             output_file=out_dataset,
-            task_uid=self.task_uid,
             projection=3857,
         )
         get_task_command_mock.assert_called_once_with(
@@ -324,14 +297,11 @@ class TestGdalUtils(TestCase):
             boundary=None,
             src_srs=in_projection,
             dst_srs=out_projection,
-            task_uid=self.task_uid,
             translate_params=None,
             warp_params=None,
             use_translate=False,
         )
         get_task_command_mock.reset_mock()
-        self.task_process().start_process.assert_called_once_with(lambda_mock)
-        self.task_process.reset_mock()
 
     @patch("gdal_utils.gdal.ogr")
     @patch("gdal_utils.gdal.gdal")
@@ -420,17 +390,15 @@ class TestGdalUtils(TestCase):
         dim = get_dimensions(bbox, scale)
         self.assertEqual(dim, expected_dim)
 
-    def test_merge_geotiffs(self):
+    @patch("gdal_utils.gdal.get_task_command")
+    def test_merge_geotiffs(self, get_task_command_mock):
         in_files = ["1.tif", "2.tif", "3.tif", "4.tif"]
         out_file = "merged.tif"
-        task_uid = "1234"
-        result = merge_geotiffs(in_files, out_file, task_uid=task_uid)
-        self.task_process.start_process.called_once()
-        self.assertEqual(out_file, result)
+        lambda_mock = Mock()
+        get_task_command_mock.return_value = lambda_mock
+        merge_geotiffs(in_files, out_file)
+        get_task_command_mock.assert_called_once_with(convert_raster, in_files, out_file, driver="gtiff")
 
-        with self.assertRaises(Exception):
-            self.task_process().start_process.side_effect = Exception("Error")
-            merge_geotiffs(in_files, out_file, task_uid=task_uid)
 
     @patch("gdal_utils.gdal.gdal")
     def test_get_band_statistics(self, mock_gdal):
@@ -448,11 +416,9 @@ class TestGdalUtils(TestCase):
         ]
         self.assertIsNone(get_band_statistics(in_file))
 
-
     @patch("gdal_utils.gdal.get_dataset_names")
     @patch("gdal_utils.gdal.gdal")
     def test_convert_raster(self, mock_gdal, mock_get_dataset_names):
-        task_uid = "123"
         input_file = "/test/test.gpkg"
         output_file = "/test/test.tif"
         boundary = "/test/test.json"
@@ -467,7 +433,6 @@ class TestGdalUtils(TestCase):
             boundary=boundary,
             src_srs=srs,
             dst_srs=srs,
-            task_uid=task_uid,
         )
         mock_gdal.Warp.assert_called_once_with(
             output_file,
@@ -494,7 +459,6 @@ class TestGdalUtils(TestCase):
             boundary=boundary,
             src_srs=srs,
             dst_srs=srs,
-            task_uid=task_uid,
             warp_params=warp_params,
             translate_params=translate_params,
         )
@@ -515,7 +479,6 @@ class TestGdalUtils(TestCase):
 
     @patch("gdal_utils.gdal.gdal")
     def test_convert_vector(self, mock_gdal):
-        task_uid = "123"
         input_file = "/test/test.gpkg"
         output_file = "/test/test.kml"
         boundary = "/test/test.json"
@@ -530,7 +493,6 @@ class TestGdalUtils(TestCase):
             boundary=boundary,
             src_srs=src_srs,
             dst_srs=dst_srs,
-            task_uid=task_uid,
         )
         mock_gdal.VectorTranslate.assert_called_once_with(
             output_file,
