@@ -4,8 +4,6 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, Union
 
-from django.db import connection
-
 logger = logging.getLogger(__name__)
 
 
@@ -23,9 +21,6 @@ class TaskProcess:
     def start_process(
         self, *args, command: Optional[Union[str, Callable]] = None, **kwargs
     ):
-        # We need to close the existing connection because the logger could be using a forked process which,
-        # will be invalid and throw an error.
-        connection.close()
 
         if callable(command):
             with ThreadPoolExecutor() as executor:

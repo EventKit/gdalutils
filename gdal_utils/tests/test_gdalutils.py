@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from osgeo import gdal, ogr
 
-from gdal_utils.utils.gdal import (
+from gdal_utils.gdal import (
     convert,
     convert_raster,
     convert_vector,
@@ -17,7 +17,6 @@ from gdal_utils.utils.gdal import (
     is_envelope,
     merge_geotiffs,
     polygonize,
-    progress_callback,
 )
 
 logger = logging.getLogger(__name__)
@@ -26,13 +25,13 @@ logger = logging.getLogger(__name__)
 class TestGdalUtils(TestCase):
     def setUp(self):
         self.path = os.path.dirname(os.path.realpath(__file__))
-        self.task_process_patcher = patch("gdal_utils.utils.gdal.TaskProcess")
+        self.task_process_patcher = patch("gdal_utils.gdal.TaskProcess")
         self.task_process = self.task_process_patcher.start()
         self.addCleanup(self.task_process_patcher.stop)
         self.task_uid = uuid4()
 
-    @patch("gdal_utils.utils.gdal.os.path.isfile")
-    @patch("gdal_utils.utils.gdal.open_dataset")
+    @patch("gdal_utils.gdal.os.path.isfile")
+    @patch("gdal_utils.gdal.open_dataset")
     def test_get_meta(self, open_dataset_mock, isfile):
         dataset_path = "/path/to/dataset"
         isfile.return_value = True
@@ -103,10 +102,10 @@ class TestGdalUtils(TestCase):
         self.assertFalse(is_envelope(non_env_gj))
         self.assertFalse(is_envelope(empty_gj))
 
-    @patch("gdal_utils.utils.gdal.get_task_command")
-    @patch("gdal_utils.utils.gdal.is_envelope")
-    @patch("gdal_utils.utils.gdal.get_meta")
-    @patch("gdal_utils.utils.gdal.os.path.isfile")
+    @patch("gdal_utils.gdal.get_task_command")
+    @patch("gdal_utils.gdal.is_envelope")
+    @patch("gdal_utils.gdal.get_meta")
+    @patch("gdal_utils.gdal.os.path.isfile")
     def test_convert(
         self, isfile, get_meta_mock, is_envelope_mock, get_task_command_mock
     ):
@@ -334,8 +333,8 @@ class TestGdalUtils(TestCase):
         self.task_process().start_process.assert_called_once_with(lambda_mock)
         self.task_process.reset_mock()
 
-    @patch("gdal_utils.utils.gdal.ogr")
-    @patch("gdal_utils.utils.gdal.gdal")
+    @patch("gdal_utils.gdal.ogr")
+    @patch("gdal_utils.gdal.gdal")
     def test_polygonize(self, mock_gdal, mock_ogr):
         example_input = "input.tif"
         example_output = "output.geojson"
@@ -391,7 +390,7 @@ class TestGdalUtils(TestCase):
         distance = get_distance(point_a, point_b)
         self.assertEqual(int(expected_distance), int(distance))
 
-    @patch("gdal_utils.utils.gdal.get_distance")
+    @patch("gdal_utils.gdal.get_distance")
     def test_get_dimensions(self, mock_get_distance):
         bbox = [0.0, 1.0, 2.0, 3.0]
         scale = 10
@@ -433,7 +432,7 @@ class TestGdalUtils(TestCase):
             self.task_process().start_process.side_effect = Exception("Error")
             merge_geotiffs(in_files, out_file, task_uid=task_uid)
 
-    @patch("gdal_utils.utils.gdal.gdal")
+    @patch("gdal_utils.gdal.gdal")
     def test_get_band_statistics(self, mock_gdal):
         in_file = "test.tif"
         example_stats = [0, 10, 5, 2]
@@ -449,26 +448,9 @@ class TestGdalUtils(TestCase):
         ]
         self.assertIsNone(get_band_statistics(in_file))
 
-    @patch("gdal_utils.utils.gdal.update_progress")
-    def test_progress_callback(self, mock_update_progress):
-        example_percentage = 0.10
-        example_message = "message"
-        task_uid = "123"
-        subtask_percentage = 100
-        example_user_data = {
-            "task_uid": task_uid,
-            "subtask_percentage": subtask_percentage,
-        }
-        progress_callback(example_percentage, example_message, example_user_data)
-        mock_update_progress.assert_called_once_with(
-            task_uid,
-            progress=10,
-            subtask_percentage=subtask_percentage,
-            msg=example_message,
-        )
 
-    @patch("gdal_utils.utils.gdal.get_dataset_names")
-    @patch("gdal_utils.utils.gdal.gdal")
+    @patch("gdal_utils.gdal.get_dataset_names")
+    @patch("gdal_utils.gdal.gdal")
     def test_convert_raster(self, mock_gdal, mock_get_dataset_names):
         task_uid = "123"
         input_file = "/test/test.gpkg"
@@ -490,8 +472,6 @@ class TestGdalUtils(TestCase):
         mock_gdal.Warp.assert_called_once_with(
             output_file,
             [input_file],
-            callback=progress_callback,
-            callback_data={"task_uid": task_uid, "subtask_percentage": 50},
             cropToCutline=True,
             cutlineDSName=boundary,
             dstSRS=srs,
@@ -501,9 +481,7 @@ class TestGdalUtils(TestCase):
         mock_gdal.Translate.assert_called_once_with(
             output_file,
             input_file,
-            callback=progress_callback,
             format=driver,
-            callback_data={"task_uid": task_uid, "subtask_percentage": 50},
             creationOptions=["COMPRESS=LZW", "TILED=YES", "BIGTIFF=YES"],
         )
         mock_gdal.reset_mock()
@@ -523,8 +501,6 @@ class TestGdalUtils(TestCase):
         mock_gdal.Warp.assert_called_once_with(
             output_file,
             [input_file],
-            callback=progress_callback,
-            callback_data={"task_uid": task_uid, "subtask_percentage": 50},
             cropToCutline=True,
             cutlineDSName=boundary,
             format=driver,
@@ -533,13 +509,11 @@ class TestGdalUtils(TestCase):
         mock_gdal.Translate.assert_called_once_with(
             output_file,
             input_file,
-            callback=progress_callback,
             format=driver,
-            callback_data={"task_uid": task_uid, "subtask_percentage": 50},
             translate="params",
         )
 
-    @patch("gdal_utils.utils.gdal.gdal")
+    @patch("gdal_utils.gdal.gdal")
     def test_convert_vector(self, mock_gdal):
         task_uid = "123"
         input_file = "/test/test.gpkg"
@@ -562,8 +536,6 @@ class TestGdalUtils(TestCase):
             output_file,
             input_file,
             accessMode="overwrite",
-            callback=progress_callback,
-            callback_data={"task_uid": task_uid},
             dstSRS=dst_srs,
             format=driver,
             options=["-clipSrc", boundary],

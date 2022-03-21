@@ -5,7 +5,7 @@ black-format:
 	black .
 
 pylint:
-	pylint --load-plugins pylint_django --django-settings-module=config.settings gdal_utils utils
+	pylint gdal_utils utils
 
 flake8:
 	flake8
@@ -19,7 +19,7 @@ mypy:
 lint: black flake8 mypy pylint
 
 test:
-	DJANGO_SETTINGS_MODULE=config.settings coverage run -m pytest -vvv
+	coverage run -m pytest -vvv
 
 install-hooks:
 ifeq ($(detected_OS),Windows)

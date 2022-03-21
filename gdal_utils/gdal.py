@@ -13,9 +13,9 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from osgeo import gdal, ogr, osr
 
-from gdal_utils.utils.exceptions import CancelException
-from gdal_utils.utils.helpers import retry, update_progress
-from gdal_utils.utils.task_process import TaskProcess
+from gdal_utils.exceptions import CancelException
+from gdal_utils.helpers import retry
+from gdal_utils.task_process import TaskProcess
 
 logger = logging.getLogger(__name__)
 
@@ -27,16 +27,6 @@ GOOGLE_MAPS_FULL_WORLD = [
     20037508.342789244,
     20037508.342789244,
 ]
-
-
-def progress_callback(pct, msg, user_data):
-
-    update_progress(
-        user_data.get("task_uid"),
-        progress=round(pct * 100),
-        subtask_percentage=user_data.get("subtask_percentage", 100.0),
-        msg=msg,
-    )
 
 
 def open_dataset(file_path, is_raster):
@@ -498,11 +488,6 @@ def convert_raster(
     subtask_percentage = 50 if driver.lower() == "gtiff" else 100
     options = clean_options(
         {
-            "callback": progress_callback,
-            "callback_data": {
-                "task_uid": task_uid,
-                "subtask_percentage": subtask_percentage,
-            },
             "creationOptions": creation_options,
             "format": driver,
         }
@@ -616,8 +601,6 @@ def convert_vector(
     gdal.UseExceptions()
     options = clean_options(
         {
-            "callback": progress_callback,
-            "callback_data": {"task_uid": task_uid},
             "datasetCreationOptions": dataset_creation_options,
             "layerCreationOptions": layer_creation_options,
             "format": driver,
