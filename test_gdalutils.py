@@ -5,7 +5,7 @@ from unittest.mock import ANY, MagicMock, Mock, call, patch
 
 from osgeo import gdal, ogr
 
-from gdal_utils.gdal import (
+from gdal_utils import (
     convert,
     convert_raster,
     convert_vector,
@@ -25,8 +25,8 @@ class TestGdalUtils(TestCase):
     def setUp(self):
         self.path = os.path.dirname(os.path.realpath(__file__))
 
-    @patch("gdal_utils.gdal.os.path.isfile")
-    @patch("gdal_utils.gdal.open_dataset")
+    @patch("gdal_utils.os.path.isfile")
+    @patch("gdal_utils.open_dataset")
     def test_get_meta(self, open_dataset_mock, isfile):
         dataset_path = "/path/to/dataset"
         isfile.return_value = True
@@ -96,10 +96,10 @@ class TestGdalUtils(TestCase):
         self.assertFalse(is_envelope(non_env_gj))
         self.assertFalse(is_envelope(empty_gj))
 
-    @patch("gdal_utils.gdal.get_task_command")
-    @patch("gdal_utils.gdal.is_envelope")
-    @patch("gdal_utils.gdal.get_meta")
-    @patch("gdal_utils.gdal.os.path.isfile")
+    @patch("gdal_utils.get_task_command")
+    @patch("gdal_utils.is_envelope")
+    @patch("gdal_utils.get_meta")
+    @patch("gdal_utils.os.path.isfile")
     def test_convert(
         self, isfile, get_meta_mock, is_envelope_mock, get_task_command_mock
     ):
@@ -303,8 +303,8 @@ class TestGdalUtils(TestCase):
         )
         get_task_command_mock.reset_mock()
 
-    @patch("gdal_utils.gdal.ogr")
-    @patch("gdal_utils.gdal.gdal")
+    @patch("gdal_utils.ogr")
+    @patch("gdal_utils.gdal")
     def test_polygonize(self, mock_gdal, mock_ogr):
         example_input = "input.tif"
         example_output = "output.geojson"
@@ -360,7 +360,7 @@ class TestGdalUtils(TestCase):
         distance = get_distance(point_a, point_b)
         self.assertEqual(int(expected_distance), int(distance))
 
-    @patch("gdal_utils.gdal.get_distance")
+    @patch("gdal_utils.get_distance")
     def test_get_dimensions(self, mock_get_distance):
         bbox = [0.0, 1.0, 2.0, 3.0]
         scale = 10
@@ -390,7 +390,7 @@ class TestGdalUtils(TestCase):
         dim = get_dimensions(bbox, scale)
         self.assertEqual(dim, expected_dim)
 
-    @patch("gdal_utils.gdal.get_task_command")
+    @patch("gdal_utils.get_task_command")
     def test_merge_geotiffs(self, get_task_command_mock):
         in_files = ["1.tif", "2.tif", "3.tif", "4.tif"]
         out_file = "merged.tif"
@@ -400,7 +400,7 @@ class TestGdalUtils(TestCase):
         get_task_command_mock.assert_called_once_with(convert_raster, in_files, out_file, driver="gtiff")
 
 
-    @patch("gdal_utils.gdal.gdal")
+    @patch("gdal_utils.gdal")
     def test_get_band_statistics(self, mock_gdal):
         in_file = "test.tif"
         example_stats = [0, 10, 5, 2]
@@ -416,8 +416,8 @@ class TestGdalUtils(TestCase):
         ]
         self.assertIsNone(get_band_statistics(in_file))
 
-    @patch("gdal_utils.gdal.get_dataset_names")
-    @patch("gdal_utils.gdal.gdal")
+    @patch("gdal_utils.get_dataset_names")
+    @patch("gdal_utils.gdal")
     def test_convert_raster(self, mock_gdal, mock_get_dataset_names):
         input_file = "/test/test.gpkg"
         output_file = "/test/test.tif"
@@ -477,7 +477,7 @@ class TestGdalUtils(TestCase):
             translate="params",
         )
 
-    @patch("gdal_utils.gdal.gdal")
+    @patch("gdal_utils.gdal")
     def test_convert_vector(self, mock_gdal):
         input_file = "/test/test.gpkg"
         output_file = "/test/test.kml"
