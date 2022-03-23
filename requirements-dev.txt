@@ -1,0 +1,17 @@
+# Testing
+# ------------------------------------------------------------------------------
+mypy==0.910
+pytest==6.2.5
+requests==2.26.0
+requests-mock==1.9.3
+types-requests==2.25.11
+
+# Code quality
+# ------------------------------------------------------------------------------
+autopep8==1.6.0
+beautifulsoup4==4.10.0 # Required for Fortify scanning.
+black==21.10b0
+coverage==6.1.1
+flake8==4.0.1
+flake8-isort==4.1.1
+pyupgrade==2.29.0
