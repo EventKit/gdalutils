@@ -397,8 +397,9 @@ class TestGdalUtils(TestCase):
         lambda_mock = Mock()
         get_task_command_mock.return_value = lambda_mock
         merge_geotiffs(in_files, out_file)
-        get_task_command_mock.assert_called_once_with(convert_raster, in_files, out_file, driver="gtiff")
-
+        get_task_command_mock.assert_called_once_with(
+            convert_raster, in_files, out_file, driver="gtiff"
+        )
 
     @patch("gdal_utils.gdal")
     def test_get_band_statistics(self, mock_gdal):
@@ -502,6 +503,6 @@ class TestGdalUtils(TestCase):
             format=driver,
             options=["-clipSrc", boundary],
             reproject=True,
-            skipFailures=True,
+            skipFailures=False,
             srcSRS=src_srs,
         )
