@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import copy
 import json
 import logging
 import math
@@ -8,7 +9,7 @@ from itertools import repeat
 from multiprocessing.dummy import Process, Queue
 from statistics import mean
 from tempfile import NamedTemporaryFile
-from typing import List, Optional, Tuple, TypedDict
+from typing import List, Optional, Tuple, TypedDict, Union
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from osgeo import gdal, ogr, osr
@@ -199,7 +200,7 @@ def get_area(geojson):
         for i in range(len(ring) - 2):
             a += (rad(ring[i + 1][0]) - rad(ring[i - 1][0])) * math.sin(rad(ring[i][1]))
 
-    area = abs(a * (earth_r ** 2) / 2)
+    area = abs(a * (earth_r**2) / 2)
     return area
 
 
@@ -248,7 +249,7 @@ def is_envelope(geojson_path):
 
 
 def convert(
-    boundary=None,
+    boundary: Optional[Union[list[float], tuple[float], str]] = None,
     input_files: Optional[List[str]] = None,
     output_file: Optional[str] = None,
     src_srs=4326,
@@ -505,7 +506,12 @@ def convert_raster(
             stringify_params(options),
             stringify_params(warp_params),
         )
-        gdal.Warp(output_file, input_files, **options, **warp_params)
+        gdal.Warp(
+            output_file,
+            input_files,
+            **copy.deepcopy(options),
+            **copy.deepcopy(warp_params),
+        )
 
     if driver.lower() == "gtiff" or translate_params:
         # No need to compress in memory objects as they will be removed later.
@@ -525,7 +531,7 @@ def convert_raster(
             input_file,
             stringify_params(options),
         )
-        gdal.Translate(output_file, input_file, **options)
+        gdal.Translate(output_file, input_file, **copy.deepcopy(options))
     return output_file
 
 
@@ -572,6 +578,12 @@ def convert_vector(
         else:
             raise Exception("Cannot overwrite with a list of files.")
     gdal.UseExceptions()
+    clipSrc = None
+    if boundary:
+        if isinstance(boundary, (tuple, list)):
+            clipSrc = list(map(str, boundary))
+        elif isinstance(boundary, str):
+            clipSrc = [boundary]
     options = clean_options(
         {
             "datasetCreationOptions": dataset_creation_options,
@@ -583,13 +595,13 @@ def convert_vector(
             "dstSRS": dst_srs,
             "accessMode": access_mode,
             "reproject": src_srs != dst_srs,
-            "skipFailures": True,
+            "skipFailures": False,
             "spatFilter": bbox,
-            "options": ["-clipSrc", boundary] if boundary and not bbox else None,
+            "options": ["-clipSrc"] + clipSrc if clipSrc else None,
         }
     )
     if "gpkg" in driver.lower():
-        options["geometryType"] = ["PROMOTE_TO_MULTI"]
+        options["geometryType"] = "PROMOTE_TO_MULTI"
     if config_options:
         for config_option in config_options:
             gdal.SetConfigOption(*config_option)
@@ -601,7 +613,7 @@ def convert_vector(
                 input_files,
                 stringify_params(options),
             )
-            gdal.VectorTranslate(output_file, _input_file, **options)
+            gdal.VectorTranslate(output_file, _input_file, **copy.deepcopy(options))
     else:
         logger.info(
             "calling gdal.VectorTranslate(%s, %s, %s)",
@@ -609,21 +621,24 @@ def convert_vector(
             input_files,
             stringify_params(options),
         )
-        gdal.VectorTranslate(output_file, input_files, **options)
+        gdal.VectorTranslate(output_file, input_files, **copy.deepcopy(options))
 
     if distinct_field:
         logger.error("Normalizing features based on field: %s", distinct_field)
         table_name = layer_name or os.path.splitext(os.path.basename(output_file))[0]
+        # Don't surround GROUP BY field in quotes that will break the query.
         options[
             "SQLStatement"
-        ] = f"SELECT * from '{table_name}' GROUP BY '{distinct_field}'"
+        ] = f"SELECT * from '{table_name}' GROUP BY {distinct_field}"
         logger.error(
             "calling gdal.VectorTranslate(%s, %s, %s)",
             output_file,
             output_file,
             stringify_params(options),
         )
-        gdal.VectorTranslate(output_file, rename_duplicate(output_file), **options)
+        gdal.VectorTranslate(
+            output_file, rename_duplicate(output_file), **copy.deepcopy(options)
+        )
 
     return output_file
 
@@ -793,9 +808,7 @@ def merge_geotiffs(in_files, out_file, executor=None):
     :param executor: A method to execute an arbitrary callable.
     :return: The out_file path.
     """
-    task_command = get_task_command(
-        convert_raster, in_files, out_file, driver="gtiff"
-    )
+    task_command = get_task_command(convert_raster, in_files, out_file, driver="gtiff")
 
     if executor:
         executor(task_command)

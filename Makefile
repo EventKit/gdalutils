@@ -14,7 +14,7 @@ isort:
 	isort .
 
 mypy:
-	mypy gdal_utils
+	mypy gdal_utils.py
 
 lint: black flake8 mypy pylint
 
