@@ -152,7 +152,7 @@ def get_gdal_metadata(ds_path, is_raster, multiprocess_queue):
                 )
                 if len(bands) == 1:
                     ret["nodata"] = bands[0]
-
+                ret["dim"] = [dataset.RasterXSize, dataset.RasterYSize, len(bands)]
         if ret["driver"]:
             logger.debug("Identified dataset %s as %s", ds_path, ret["driver"])
         else:
@@ -470,17 +470,15 @@ def convert_raster(
     options = clean_options({"creationOptions": creation_options, "format": driver})
     if not warp_params:
         warp_params = clean_options(
-            {
-                "outputType": band_type,
-                "dstAlpha": dst_alpha,
-                "srcSRS": src_srs,
-                "dstSRS": dst_srs,
-            }
+            {"outputType": band_type, "dstAlpha": dst_alpha, "srcSRS": src_srs, "dstSRS": dst_srs}
         )
     if not translate_params:
         translate_params = {}
     if boundary:
-        warp_params.update({"cutlineDSName": boundary, "cropToCutline": True})
+        # Conversion fails if trying to cut down very small files (i.e. 0x1 pixel error).
+        dims = list(map(sum, zip(*[get_meta(input_file)["dim"] for input_file in input_files]))) or [0, 0, 0]
+        if dims[0] > 100 and dims[1] > 100:
+            warp_params.update({"cutlineDSName": boundary, "cropToCutline": True})
     # Keep the name imagery which is used when seeding the geopackages.
     # Needed because arcpy can't change table names.
     if driver.lower() == "gpkg":

@@ -417,9 +417,10 @@ class TestGdalUtils(TestCase):
         ]
         self.assertIsNone(get_band_statistics(in_file))
 
+    @patch("gdal_utils.get_meta")
     @patch("gdal_utils.get_dataset_names")
     @patch("gdal_utils.gdal")
-    def test_convert_raster(self, mock_gdal, mock_get_dataset_names):
+    def test_convert_raster(self, mock_gdal, mock_get_dataset_names, mock_get_meta):
         input_file = "/test/test.gpkg"
         output_file = "/test/test.tif"
         boundary = "/test/test.json"
@@ -435,11 +436,10 @@ class TestGdalUtils(TestCase):
             src_srs=srs,
             dst_srs=srs,
         )
+        mock_get_meta.assert_called_once_with(input_file)
         mock_gdal.Warp.assert_called_once_with(
             output_file,
             [input_file],
-            cropToCutline=True,
-            cutlineDSName=boundary,
             dstSRS=srs,
             format=driver,
             srcSRS=srs,
@@ -453,6 +453,7 @@ class TestGdalUtils(TestCase):
         mock_gdal.reset_mock()
         warp_params = {"warp": "params"}
         translate_params = {"translate": "params"}
+        mock_get_meta.return_value = {"dim": [200, 200, 1]}
         convert_raster(
             input_file,
             output_file,
