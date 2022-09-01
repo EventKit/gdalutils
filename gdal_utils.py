@@ -151,7 +151,7 @@ def get_gdal_metadata(ds_path, is_raster, multiprocess_queue):
                 )
                 if len(bands) == 1:
                     ret["nodata"] = bands[0]
-
+                ret["dim"] = [dataset.RasterXSize, dataset.RasterYSize, len(bands)]
         if ret["driver"]:
             logger.debug("Identified dataset %s as %s", ds_path, ret["driver"])
         else:
