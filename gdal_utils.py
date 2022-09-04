@@ -252,11 +252,12 @@ def convert(
     boundary: Optional[Union[list[float], tuple[float], str]] = None,
     input_files: Optional[List[str]] = None,
     output_file: Optional[str] = None,
-    src_srs=4326,
+    src_srs=None,
+    dst_srs=None,
     driver=None,
     layers=None,
     layer_name=None,
-    projection: int = 4326,
+    projection: int = None,
     creation_options: list = None,
     dataset_creation_options: list = None,
     layer_creation_options: list = None,
@@ -283,6 +284,8 @@ def convert(
     :param driver: Short name of output driver to use (defaults to input format)
     :param layer_name: Table name in database for in_dataset
     :param layers: A list of layers to include for translation.
+    :param src_srs=4326,
+    :param dest_srs=4326,
     :param projection: A projection as an int referencing an EPSG code (e.g. 4326 = EPSG:4326)
     :param creation_options: Additional options to pass to the convert method (e.g. "-co SOMETHING")
     :param config_options: A list of gdal configuration options as a tuple (option, value).
@@ -300,8 +303,10 @@ def convert(
         input_files[_index], output_file = get_dataset_names(_file, output_file)
         meta_list.append(get_meta(input_files[_index], is_raster))
 
-    src_src = f"EPSG:{src_srs}"
-    dst_src = f"EPSG:{projection}"
+
+    source_srs = f"EPSG:{src_srs}" if src_srs else None
+    destination_srs = f"EPSG:{projection}" if dst_srs else None
+    destination_srs = f"EPSG:{projection}" if projection and not destination_srs else "EPSG:4326"
     # Currently, when there are more than 1 files, they much each be the same driver, making the meta the same.
     meta = meta_list[0]
     if not driver:
@@ -347,8 +352,8 @@ def convert(
             band_type=band_type,
             dst_alpha=dstalpha,
             boundary=boundary,
-            src_srs=src_src,
-            dst_srs=dst_src,
+            src_srs=source_srs,
+            dst_srs=destination_srs,
             warp_params=warp_params,
             translate_params=translate_params,
             use_translate=use_translate,
@@ -362,8 +367,8 @@ def convert(
             driver=driver,
             dataset_creation_options=dataset_creation_options,
             layer_creation_options=layer_creation_options,
-            src_srs=src_src,
-            dst_srs=dst_src,
+            src_srs=source_srs,
+            dst_srs=destination_srs,
             layers=layers,
             layer_name=layer_name,
             boundary=boundary,
