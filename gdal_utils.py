@@ -86,7 +86,15 @@ def cleanup_dataset(dataset):
         del dataset
 
 
-def get_meta(ds_path, is_raster=True):
+class GdalUtilsMetadata(TypedDict):
+    dim: list[int]
+    driver: Optional[str]
+    is_raster: Optional[bool]
+    nodata: Optional[float]
+    srs: Optional[int]
+
+
+def get_meta(ds_path, is_raster=True) -> GdalUtilsMetadata:
     """
     This function is a wrapper for the get_gdal metadata because if there is a database disconnection there is no
     obvious way to clean up and free those resources therefore it is put on a separate process and if it fails it can
@@ -123,16 +131,14 @@ def get_gdal_metadata(ds_path, is_raster, multiprocess_queue):
     """
 
     dataset = None
-    ret_type = TypedDict(
-        "ret_type",
-        {
-            "driver": Optional[str],
-            "is_raster": Optional[bool],
-            "nodata": Optional[float],
-        },
-    )
 
-    ret: ret_type = {"driver": None, "is_raster": None, "nodata": None}
+    ret: GdalUtilsMetadata = {
+        "driver": None,
+        "is_raster": None,
+        "nodata": None,
+        "dim": [],
+        "srs": None,
+    }
 
     try:
         dataset = open_dataset(ds_path, is_raster)
@@ -155,6 +161,17 @@ def get_gdal_metadata(ds_path, is_raster, multiprocess_queue):
                 ret["dim"] = [dataset.RasterXSize, dataset.RasterYSize, len(bands)]
         if ret["driver"]:
             logger.debug("Identified dataset %s as %s", ds_path, ret["driver"])
+            srs = dataset.GetSpatialRef() if hasattr(dataset, "GetSpatialRef") else None
+            if srs:
+                srs.AutoIdentifyEPSG()
+                srs_code = None
+                try:
+                    srs_code = srs.GetAttrValue("Authority", 1)
+                    ret["srs"] = int(srs_code)
+                except (ValueError, TypeError):
+                    logger.info(
+                        "File has an srs code that isn't an integer %s", srs_code
+                    )
         else:
             logger.debug("Could not identify dataset %s", ds_path)
 
@@ -265,6 +282,7 @@ def convert(
     warp_params: dict = None,
     translate_params: dict = None,
     use_translate: bool = False,
+    skip_failures: bool = False,
     access_mode: str = "overwrite",
     config_options: List[Tuple[str]] = None,
     distinct_field=None,
@@ -303,12 +321,13 @@ def convert(
         input_files[_index], output_file = get_dataset_names(_file, output_file)
         meta_list.append(get_meta(input_files[_index], is_raster))
 
-
     source_srs = f"EPSG:{src_srs}" if src_srs else None
     destination_srs = f"EPSG:{projection}" if dst_srs else None
-    destination_srs = f"EPSG:{projection}" if projection and not destination_srs else "EPSG:4326"
+    destination_srs = (
+        f"EPSG:{projection}" if projection and not destination_srs else "EPSG:4326"
+    )
     # Currently, when there are more than 1 files, they much each be the same driver, making the meta the same.
-    meta = meta_list[0]
+    meta: GdalUtilsMetadata = meta_list[0]
     if not driver:
         driver = meta["driver"] or "gpkg"
 
@@ -326,11 +345,13 @@ def convert(
     bbox = None
     if boundary:
         # Strings are expected to be a file.
+        boundary_file: Optional[str] = None
         if isinstance(boundary, str):
             if not os.path.isfile(boundary):
                 raise Exception(
                     f"Called convert using a boundary of {boundary} but no such path exists."
                 )
+            boundary_file = boundary
         elif is_valid_bbox(boundary):
             geojson = bbox2polygon(boundary)
             bbox = boundary
@@ -340,7 +361,15 @@ def convert(
             temp_boundfile = NamedTemporaryFile(suffix=".json")
             temp_boundfile.write(json.dumps(geojson).encode())
             temp_boundfile.flush()
-            boundary = temp_boundfile.name
+            boundary_file = temp_boundfile.name
+        if boundary_file and meta.get("srs") != 4326:
+            boundary_filename = f"{os.path.splitext(boundary_file)[0]}-aoi.gpkg"
+            boundary = convert(
+                input_files=[boundary_file],
+                output_file=boundary_filename,
+                driver="gpkg",
+                dst_srs=meta.get("srs"),
+            )
 
     if meta["is_raster"]:
         task_command = get_task_command(
@@ -376,6 +405,7 @@ def convert(
             access_mode=access_mode,
             config_options=config_options,
             distinct_field=distinct_field,
+            skip_failures=skip_failures,
         )
 
     if executor:
@@ -462,7 +492,8 @@ def convert_raster(
     """
     if not driver:
         raise Exception("Cannot use convert_raster without specififying a gdal driver.")
-
+    if boundary and not (isinstance(boundary, str) and os.path.isfile(boundary)):
+        raise Exception("The boundary param must be the path to a vector file.")
     if isinstance(input_files, str) and not use_translate:
         input_files = [input_files]
     elif isinstance(input_files, list) and use_translate:
@@ -475,14 +506,21 @@ def convert_raster(
     options = clean_options({"creationOptions": creation_options, "format": driver})
     if not warp_params:
         warp_params = clean_options(
-            {"outputType": band_type, "dstAlpha": dst_alpha, "srcSRS": src_srs, "dstSRS": dst_srs}
+            {
+                "outputType": band_type,
+                "dstAlpha": dst_alpha,
+                "srcSRS": src_srs,
+                "dstSRS": dst_srs,
+            }
         )
     if not translate_params:
         translate_params = {}
     if boundary:
         # Conversion fails if trying to cut down very small files (i.e. 0x1 pixel error).
-        dims = list(map(sum, zip(*[get_meta(input_file)["dim"] for input_file in input_files]))) or [0, 0, 0]
-        if dims[0] > 100 and dims[1] > 100:
+        dims = list(
+            map(sum, zip(*[get_meta(input_file)["dim"] for input_file in input_files]))
+        ) or [0, 0, 0]
+        if dims[0] > 100 and dims[1] > 100:  # type: ignore
             warp_params.update({"cutlineDSName": boundary, "cropToCutline": True})
     # Keep the name imagery which is used when seeding the geopackages.
     # Needed because arcpy can't change table names.
@@ -549,6 +587,7 @@ def convert_vector(
     layer_name=None,
     boundary=None,
     bbox=None,
+    skip_failures: bool = False,
     dataset_creation_options=None,
     layer_creation_options=None,
     config_options: List[Tuple[str]] = None,
@@ -598,7 +637,7 @@ def convert_vector(
             "dstSRS": dst_srs,
             "accessMode": access_mode,
             "reproject": src_srs != dst_srs,
-            "skipFailures": False,
+            "skipFailures": skip_failures,
             "spatFilter": bbox,
             "options": ["-clipSrc"] + clipSrc if clipSrc else None,
         }
@@ -928,8 +967,8 @@ def validate_bbox(bbox: list):
     return bbox
 
 
-def is_valid_bbox(bbox):
-    if not isinstance(bbox, list) or len(bbox) != 4:
+def is_valid_bbox(bbox: Optional[Union[list, tuple, str]]):
+    if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
         return False
     if bbox[0] < bbox[2] and bbox[1] < bbox[3]:
         return True
@@ -980,7 +1019,7 @@ def get_file_paths(directory):
     """
     paths = {}
     with cd(directory):
-        for dirpath, _, filenames in os.walk("/"):
+        for dirpath, _, filenames in os.walk("."):
             for f in filenames:
                 paths[os.path.abspath(os.path.join(dirpath, f))] = os.path.join(
                     dirpath, f
@@ -1022,3 +1061,38 @@ def get_zip_name(file_name):
     if ext == ".kml":
         return basename + ".kmz"
     return basename + ".zip"
+
+
+def reproject(geom: ogr.Geometry, from_srs: int, to_srs: int) -> ogr.Geometry:
+    """
+    Reprojects a geometry.
+    :param geom: An OGR geometry.
+    :param from_srs: An EPSG integer.
+    :param to_srs: An EPSG integer.
+    :return: The reprojected OGR geometry.
+    """
+
+    source = osr.SpatialReference()
+    source.ImportFromEPSG(from_srs)
+    target = osr.SpatialReference()
+    target.ImportFromEPSG(to_srs)
+    transform = osr.CoordinateTransformation(source, target)
+    geom.Transform(transform)
+    return geom
+
+
+def convert_bbox(
+    bbox: Union[list, tuple], source_projection=4326, to_projection=4326
+) -> list[float]:
+    if to_projection == source_projection:
+        return list(bbox)
+    lower_left: ogr.Geometry = ogr.CreateGeometryFromJson(
+        json.dumps({"type": "point", "coordinates": [bbox[1], bbox[0]]})
+    )
+    upper_right: ogr.Geometry = ogr.CreateGeometryFromJson(
+        json.dumps({"type": "point", "coordinates": [bbox[3], bbox[2]]})
+    )
+    ll_point: ogr.Geometry = reproject(lower_left, source_projection, to_projection)
+    ur_point: ogr.Geometry = reproject(upper_right, source_projection, to_projection)
+
+    return [ll_point.GetX(), ll_point.GetY(), ur_point.GetX(), ur_point.GetY()]
