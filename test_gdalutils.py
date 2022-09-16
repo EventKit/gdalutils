@@ -35,7 +35,13 @@ class TestGdalUtils(TestCase):
         mock_open_dataset.RasterCount = 0
         open_dataset_mock.return_value = mock_open_dataset
         mock_open_dataset.GetDriver.return_value.ShortName = "gtiff"
-        expected_meta = {"driver": "gtiff", "is_raster": True, "nodata": None}
+        expected_meta = {
+            "driver": "gtiff",
+            "is_raster": True,
+            "nodata": None,
+            "dim": [],
+            "srs": None,
+        }
         returned_meta = get_meta(dataset_path)
         self.assertEqual(expected_meta, returned_meta)
 
@@ -43,19 +49,40 @@ class TestGdalUtils(TestCase):
         mock_open_dataset.GetRasterBand.return_value.GetNoDataValue.return_value = (
             -32768.0
         )
-        expected_meta = {"driver": "gtiff", "is_raster": True, "nodata": -32768.0}
+        expected_dimensions = [200, 300, 1]
+        mock_open_dataset.RasterXSize = expected_dimensions[0]
+        mock_open_dataset.RasterYSize = expected_dimensions[1]
+        expected_meta = {
+            "driver": "gtiff",
+            "is_raster": True,
+            "nodata": -32768.0,
+            "dim": expected_dimensions,
+            "srs": None,
+        }
         returned_meta = get_meta(dataset_path)
         self.assertEqual(expected_meta, returned_meta)
 
         mock_open_dataset = Mock(spec=ogr.DataSource)
         open_dataset_mock.return_value = mock_open_dataset
         mock_open_dataset.GetDriver.return_value.GetName.return_value = "gpkg"
-        expected_meta = {"driver": "gpkg", "is_raster": False, "nodata": None}
+        expected_meta = {
+            "driver": "gpkg",
+            "is_raster": False,
+            "nodata": None,
+            "dim": [],
+            "srs": None,
+        }
         returned_meta = get_meta(dataset_path)
         self.assertEqual(expected_meta, returned_meta)
 
         open_dataset_mock.return_value = None
-        expected_meta = {"driver": None, "is_raster": None, "nodata": None}
+        expected_meta = {
+            "driver": None,
+            "is_raster": None,
+            "nodata": None,
+            "dim": [],
+            "srs": None,
+        }
         returned_meta = get_meta(dataset_path)
         self.assertEqual(expected_meta, returned_meta)
 
@@ -112,6 +139,7 @@ class TestGdalUtils(TestCase):
         in_projection = "EPSG:4326"
         out_projection = "EPSG:3857"
         geojson_file = "/path/to/geojson"
+        reproj_geojson_file = "/path/to/geojson-aoi.gpkg"
         out_dataset = "/path/to/dataset"
         in_dataset = "/path/to/old_dataset"
         driver = "gpkg"
@@ -123,11 +151,12 @@ class TestGdalUtils(TestCase):
             "driver": "gpkg",
             "is_raster": True,
             "nodata": None,
+            "srs": 4326,
         }
         is_envelope_mock.return_value = False
         convert(
             boundary=geojson_file,
-            input_files=in_dataset,
+            input_files=[in_dataset],
             output_file=out_dataset,
             driver=driver,
             projection=3857,
@@ -142,7 +171,7 @@ class TestGdalUtils(TestCase):
             band_type=band_type,
             dst_alpha=dstalpha,
             boundary=geojson_file,
-            src_srs=in_projection,
+            src_srs=None,
             dst_srs=out_projection,
             translate_params=None,
             warp_params=None,
@@ -158,11 +187,12 @@ class TestGdalUtils(TestCase):
             "driver": "gtiff",
             "is_raster": True,
             "nodata": None,
+            "srs": 4326,
         }
         is_envelope_mock.return_value = True  # So, no need for -dstalpha
         convert(
             boundary=geojson_file,
-            input_files=in_dataset,
+            input_files=[in_dataset],
             output_file=out_dataset,
             driver=driver,
         )
@@ -176,7 +206,7 @@ class TestGdalUtils(TestCase):
             band_type=band_type,
             dst_alpha=dstalpha,
             boundary=geojson_file,
-            src_srs=in_projection,
+            src_srs=None,
             dst_srs=in_projection,
             translate_params=None,
             warp_params=None,
@@ -189,7 +219,7 @@ class TestGdalUtils(TestCase):
         dstalpha = True
         convert(
             boundary=geojson_file,
-            input_files=in_dataset,
+            input_files=[in_dataset],
             output_file=out_dataset,
             driver=driver,
         )
@@ -203,7 +233,7 @@ class TestGdalUtils(TestCase):
             band_type=band_type,
             dst_alpha=dstalpha,
             boundary=geojson_file,
-            src_srs=in_projection,
+            src_srs=None,
             dst_srs=in_projection,
             translate_params=None,
             warp_params=None,
@@ -216,32 +246,53 @@ class TestGdalUtils(TestCase):
         get_meta_mock.return_value = {"driver": "gpkg", "is_raster": False}
         convert(
             boundary=geojson_file,
-            input_files=in_dataset,
+            input_files=[in_dataset],
             output_file=out_dataset,
             driver=driver,
         )
-        get_task_command_mock.assert_called_once_with(
-            convert_vector,
-            [in_dataset],
-            out_dataset,
-            driver=driver,
-            config_options=None,
-            dataset_creation_options=None,
-            layer_creation_options=None,
-            src_srs=in_projection,
-            dst_srs=in_projection,
-            layers=None,
-            layer_name=None,
-            access_mode="overwrite",
-            boundary=geojson_file,
-            bbox=None,
-            distinct_field=None,
+        get_task_command_mock.has_calls(
+            [
+                call(
+                    convert_vector,
+                    [in_dataset],
+                    out_dataset,
+                    driver=driver,
+                    config_options=None,
+                    dataset_creation_options=None,
+                    layer_creation_options=None,
+                    src_srs=None,
+                    dst_srs=in_projection,
+                    layers=None,
+                    layer_name=None,
+                    access_mode="overwrite",
+                    boundary=geojson_file,
+                    bbox=None,
+                    distinct_field=None,
+                ),
+                call(
+                    convert_vector,
+                    [geojson_file],
+                    reproj_geojson_file,
+                    driver=driver,
+                    config_options=None,
+                    dataset_creation_options=None,
+                    layer_creation_options=None,
+                    src_srs=None,
+                    dst_srs=in_projection,
+                    layers=None,
+                    layer_name=None,
+                    access_mode="overwrite",
+                    boundary=geojson_file,
+                    bbox=None,
+                    distinct_field=None,
+                ),
+            ]
         )
         get_task_command_mock.reset_mock()
 
         # Test that extra_parameters are added when converting to NITF.
         driver = "nitf"
-        extra_parameters = "-co ICORDS=G"
+        extra_parameters = ["-co ICORDS=G"]
         in_projection = "EPSG:4326"
         out_projection = "EPSG:3857"
         band_type = None
@@ -249,9 +300,10 @@ class TestGdalUtils(TestCase):
         get_meta_mock.return_value = {"driver": "gpkg", "is_raster": True}
         convert(
             driver=driver,
-            input_files=in_dataset,
+            input_files=[in_dataset],
             creation_options=extra_parameters,
             output_file=out_dataset,
+            src_srs=4326,
             projection=3857,
         )
         get_task_command_mock.assert_called_once_with(
@@ -281,7 +333,7 @@ class TestGdalUtils(TestCase):
         get_meta_mock.return_value = {"driver": "gpkg", "is_raster": True}
         convert(
             driver=driver,
-            input_files=in_dataset,
+            input_files=[in_dataset],
             output_file=out_dataset,
             projection=3857,
         )
@@ -295,7 +347,7 @@ class TestGdalUtils(TestCase):
             band_type=band_type,
             dst_alpha=dstalpha,
             boundary=None,
-            src_srs=in_projection,
+            src_srs=None,
             dst_srs=out_projection,
             translate_params=None,
             warp_params=None,
@@ -417,16 +469,26 @@ class TestGdalUtils(TestCase):
         ]
         self.assertIsNone(get_band_statistics(in_file))
 
+    @patch("gdal_utils.os.path.isfile")
     @patch("gdal_utils.get_meta")
     @patch("gdal_utils.get_dataset_names")
     @patch("gdal_utils.gdal")
-    def test_convert_raster(self, mock_gdal, mock_get_dataset_names, mock_get_meta):
+    def test_convert_raster(
+        self, mock_gdal, mock_get_dataset_names, mock_get_meta, mock_isfile
+    ):
         input_file = "/test/test.gpkg"
         output_file = "/test/test.tif"
         boundary = "/test/test.json"
         driver = "gtiff"
         srs = "EPSG:4326"
-
+        mock_isfile.return_value = True
+        mock_get_meta.return_value = {
+            "driver": "gtiff",
+            "is_raster": True,
+            "nodata": None,
+            "dim": [50, 50, 1],
+            "srs": 4326,
+        }
         mock_get_dataset_names.return_value = (input_file, output_file)
         convert_raster(
             input_file,
