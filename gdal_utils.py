@@ -161,7 +161,8 @@ def get_gdal_metadata(ds_path, is_raster, multiprocess_queue):
                 ret["dim"] = [dataset.RasterXSize, dataset.RasterYSize, len(bands)]
         if ret["driver"]:
             logger.debug("Identified dataset %s as %s", ds_path, ret["driver"])
-            srs = dataset.GetSpatialRef() if hasattr(dataset, "GetSpatialRef") else None
+            layer = dataset.GetLayer() if hasattr(dataset, "GetLayer") else dataset
+            srs = layer.GetSpatialRef() if hasattr(layer, "GetSpatialRef") else None
             if srs:
                 srs.AutoIdentifyEPSG()
                 srs_code = None
