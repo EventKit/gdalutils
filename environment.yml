@@ -2,5 +2,5 @@ name: gdalutils
 channels:
   - conda-forge
 dependencies:
-  - GDAL=3.2.1
-  - proj=7.1.1
+  - GDAL >=3.0.0
+  - proj >=7.0.0
