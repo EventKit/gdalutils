@@ -30,6 +30,7 @@ def open_dataset(file_path, is_raster):
     """
     Given a path to a raster or vector dataset, returns an opened GDAL or OGR dataset.
     The caller has the responsibility of closing/deleting the dataset when finished.
+    :param is_raster:
     :param file_path: Path to dataset
     :return: Handle to open dataset
     """
@@ -78,7 +79,8 @@ def cleanup_dataset(dataset):
     """
     Given an input gdal.Dataset or ogr.DataSource, destroy it.
     NB: referring to this object's members after destruction will crash the Python interpreter.
-    :param resources: Dataset / DataSource to destroy
+    :param dataset:
+    :param dataset: Dataset / DataSource to destroy
     """
     if dataset:
         logger.info("Closing the resources: %s.", dataset)
@@ -87,7 +89,7 @@ def cleanup_dataset(dataset):
 
 
 class GdalUtilsMetadata(TypedDict):
-    dim: list[int]
+    dim: List[int]
     driver: Optional[str]
     is_raster: Optional[bool]
     nodata: Optional[float]
@@ -97,17 +99,12 @@ class GdalUtilsMetadata(TypedDict):
 def get_meta(ds_path, is_raster=True) -> GdalUtilsMetadata:
     """
     This function is a wrapper for the get_gdal metadata because if there is a database disconnection there is no
-    obvious way to clean up and free those resources therefore it is put on a separate process and if it fails it can
-    just be tried again.
+    obvious way to clean up and free those resources therefore it is put on a separate process and if it fails it
+    can just be tried again.
 
     This is using GDAL 2.2.4 this should be checked again to see if it can be simplified in a later version.
-    :param ds_path: String: Path to dataset
-    :param is_raster Boolean: Do not try to do OGR lookup if a raster dataset can be opened, otherwise it will try both,
-         and return the vector if that is an option.
-    :return: Metadata dict
-        driver: Short name of GDAL driver for dataset
-        is_raster: True if dataset is a raster type
-        nodata: NODATA value for all bands if all bands have the same one, otherwise None (raster sets only)
+    :param is_raster:
+    :param ds_path: String: Path to datasets if all bands have the same one, otherwise None (raster sets only)
     """
 
     multiprocess_queue: Queue = Queue()
@@ -125,8 +122,11 @@ def get_gdal_metadata(ds_path, is_raster, multiprocess_queue):
 
     Given a path to a raster or vector dataset, return the appropriate driver type.
 
+    :param is_raster:
+    :param multiprocess_queue:
     :param ds_path: String: Path to dataset
-    :param A multiprocess queue.
+    :param is_raster: Bool: A boolean if dataset is known to be raster.
+    :param multiprocess_queue A multiprocess queue.
     :return: None.
     """
 
@@ -267,7 +267,7 @@ def is_envelope(geojson_path):
 
 
 def convert(
-    boundary: Optional[Union[list[float], tuple[float], str]] = None,
+    boundary: Optional[Union[List[float], Tuple[float], str]] = None,
     input_files: Optional[List[str]] = None,
     output_file: Optional[str] = None,
     src_srs=None,
@@ -291,6 +291,11 @@ def convert(
 ):
     """
     Uses gdal to convert and clip a supported dataset file to a mask if boundary is passed in.
+    :param dst_srs:
+    :param skip_failures:
+    :param access_mode:
+    :param distinct_field:
+    :param executor:
     :param use_translate: A flag to force the use of translate instead of warp.
     :param layer_creation_options: Data options specific to vector conversion.
     :param dataset_creation_options: Data options specific to vector conversion.
@@ -304,7 +309,7 @@ def convert(
     :param layer_name: Table name in database for in_dataset
     :param layers: A list of layers to include for translation.
     :param src_srs=4326,
-    :param dest_srs=4326,
+    :param dst_srs=4326,
     :param projection: A projection as an int referencing an EPSG code (e.g. 4326 = EPSG:4326)
     :param creation_options: Additional options to pass to the convert method (e.g. "-co SOMETHING")
     :param config_options: A list of gdal configuration options as a tuple (option, value).
@@ -474,6 +479,7 @@ def convert_raster(
     config_options: List[Tuple[str]] = None,
 ):
     """
+    :param access_mode:
     :param warp_params: A dict of options to pass to gdal warp (done first in conversion), overrides other settings.
     :param translate_params: A dict of options to pass to gdal translate (done second in conversion),
         overrides other settings.
@@ -595,10 +601,16 @@ def convert_vector(
     distinct_field=None,
 ):
     """
+    :param skip_failures:
+    :param dataset_creation_options:
+    :param layer_creation_options:
     :param input_files: A file or list of files to convert.
     :param output_file: The file to convert.
     :param driver: The file format to convert.
-    :param creation_options: Special GDAL options for conversion.
+    :param skip_failures: bool: Does not raise an exception if there is an error during conversion (default: False),
+    :param dataset_creation_options: Special GDAL options for conversion.
+        Search for "gdal driver <format> creation options" creation options for driver specific implementation.
+    :param layer_creation_options: Special GDAL options for conversion.
         Search for "gdal driver <format> creation options" creation options for driver specific implementation.
     :param access_mode: The access mode for the file (e.g. "append" or "overwrite")
     :param bbox: A bounding box as a list (w,s,e,n) to be used for limiting the AOI that is used during conversion.
@@ -897,6 +909,7 @@ def get_band_statistics(file_path, band=1):
     :return: A list [min, max, mean, std_dev]
     """
     image_file = None
+    raster_band = None
     try:
         gdal.UseExceptions()
         image_file = gdal.Open(file_path)
@@ -1084,7 +1097,7 @@ def reproject(geom: ogr.Geometry, from_srs: int, to_srs: int) -> ogr.Geometry:
 
 def convert_bbox(
     bbox: Union[list, tuple], source_projection=4326, to_projection=4326
-) -> list[float]:
+) -> List[float]:
     if to_projection == source_projection:
         return list(bbox)
     lower_left: ogr.Geometry = ogr.CreateGeometryFromJson(

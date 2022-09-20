@@ -326,7 +326,6 @@ class TestGdalUtils(TestCase):
 
         # Test converting to a new projection
         driver = "gpkg"
-        in_projection = "EPSG:4326"
         out_projection = "EPSG:3857"
         band_type = gdal.GDT_Byte
         dstalpha = True
