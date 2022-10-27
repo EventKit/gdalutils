@@ -685,12 +685,16 @@ def convert_vector(
         options[
             "SQLStatement"
         ] = f"SELECT * from '{table_name}' GROUP BY {distinct_field}"
+        # Doing these will lose data if projections and selection don't match, that stuff should have been done already.
+        for option_field in ["reproject", "skipFailures", "spatFilter", "options"]:
+            options.pop(option_field, None)
         logger.error(
             "calling gdal.VectorTranslate(%s, %s, %s)",
             output_file,
             output_file,
             stringify_params(options),
         )
+
         gdal.VectorTranslate(
             output_file, rename_duplicate(output_file), **copy.deepcopy(options)
         )
