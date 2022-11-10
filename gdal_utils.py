@@ -661,11 +661,14 @@ def convert_vector(
         for config_option in config_options:
             gdal.SetConfigOption(*config_option)
     if access_mode == "append":
-        for _input_file in input_files:
+        options["accessMode"] = "overwrite"
+        gdal.VectorTranslate(output_file, input_files[0], **copy.deepcopy(options))
+        for _input_file in input_files[1:]:
+            options["accessMode"] = "append"
             logger.info(
                 "calling gdal.VectorTranslate(%s, %s, %s)",
                 output_file,
-                input_files,
+                _input_file,
                 stringify_params(options),
             )
             gdal.VectorTranslate(output_file, _input_file, **copy.deepcopy(options))
